@@ -37,7 +37,7 @@ Two experiments are included:
 REQUIREMENTS
 ------------
   Python 3.8+
-  CUDA-enabled GPU recommended (~8 GB VRAM minimum)
+  CUDA-enabled GPU recommended
 
   Install dependencies:
     pip install -r requirements.txt
@@ -167,16 +167,3 @@ OUTPUT
       stress_degradation_curve.png      Stress degradation curves
       stress_sensitivity_specificity.png
       average_metrics_table.csv
-
-
-VERIFICATION
-------------
-  Pre-computed results from Vertex AI (NVIDIA A100) runs are included
-  in the results/ directory. After re-running, compare your results
-  with these reference values. Minor differences (< 0.01 AUROC) are
-  expected due to GPU/hardware non-determinism.
-
-
-CITATION
---------
-  [To be added upon publication]
