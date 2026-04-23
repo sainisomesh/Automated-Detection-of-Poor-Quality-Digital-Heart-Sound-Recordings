@@ -3,15 +3,16 @@ Audio Spectrogram Transformer Heart Quality - Noise Robustness Evaluation
 
 DESCRIPTION
 -----------
-This repository contains the code and data to reproduce the noise
-robustness evaluation of the AST-QA (Audio Spectrogram Transformer
-for Quality Assurance) model for digital heart sound quality detection.
+This repository contains the code and data to reproduce the noise robustness evaluation of the Audio Spectrogram Transfomer (AST) model for digital heart sound quality detection. 
 
-The AST-QA model classifies 10-second audio recordings as either
+The AST model classifies 10-second audio recordings as either
 containing a valid heart sound (label=1) or being noise-contaminated
 (label=0). It uses Mel-spectrograms processed through MIT's pretrained
-Audio Spectrogram Transformer (AST) with a custom binary classification
-head.
+Audio Spectrogram Transformer (AST). Specifically, we take the 
+`MIT/ast-finetuned-audioset-10-10-0.4593` checkpoint from Hugging Face, 
+which was originally pre-trained on the AudioSet dataset. We extract 
+this base transformer encoder and fine-tune it by adding a custom 
+binary classification head for heart quality assurance.
 
 Noise contamination is controlled by a parameter λ using RMS-based mixing:
 
