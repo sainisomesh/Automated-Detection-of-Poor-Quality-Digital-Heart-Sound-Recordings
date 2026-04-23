@@ -1,4 +1,4 @@
-AST HEART QUALITY — NOISE ROBUSTNESS EVALUATION
+Audio Spectrogram Transformer Heart Quality - Noise Robustness Evaluation
 =================================================
 
 DESCRIPTION
