@@ -43,8 +43,15 @@ def plot_three_strategies(results, output_dir):
         if s_name not in results:
             continue
         lambdas = sorted([float(l) for l in results[s_name].keys()])
-        means = [results[s_name][str(l)]['mean']['auroc'] for l in lambdas]
-        cis = [results[s_name][str(l)]['ci']['auroc'] for l in lambdas]
+        
+        # Robust metric access
+        def get_val(r, metric, stat):
+            if stat in r and metric in r[stat]: return r[stat][metric]
+            if metric in r and stat in r[metric]: return r[metric][stat]
+            return 0.0
+
+        means = [get_val(results[s_name][str(l)], 'auroc', 'mean') for l in lambdas]
+        cis = [get_val(results[s_name][str(l)], 'auroc', 'ci') for l in lambdas]
 
         ax.errorbar(lambdas, means, yerr=cis, label=cfg['label'],
                     color=cfg['color'], capsize=5, marker=cfg['marker'],
@@ -156,10 +163,18 @@ def generate_summary_table(results, output_dir):
         for l_val in sorted(results[s_name].keys(), key=float):
             m = results[s_name][l_val]
             row = {"strategy": s_name, "lambda": float(l_val)}
+            
+            def get_val(r, metric, stat):
+                if stat in r and metric in r[stat]: return r[stat][metric]
+                if metric in r and stat in r[metric]: return r[metric][stat]
+                return 0.0
+
             for metric in ["auroc", "auprc", "f1", "accuracy", "sensitivity", "specificity"]:
-                row[f"{metric}_mean"] = m["mean"][metric]
-                row[f"{metric}_ci"] = m["ci"][metric]
-                row[metric] = f"{m['mean'][metric]:.4f} ± {m['ci'][metric]:.4f}"
+                mean_val = get_val(m, metric, "mean")
+                ci_val = get_val(m, metric, "ci")
+                row[f"{metric}_mean"] = mean_val
+                row[f"{metric}_ci"] = ci_val
+                row[metric] = f"{mean_val:.4f} ± {ci_val:.4f}"
             rows.append(row)
 
     df = pd.DataFrame(rows)
