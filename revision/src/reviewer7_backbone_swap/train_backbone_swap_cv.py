@@ -1,42 +1,53 @@
 #!/usr/bin/env python3
 """
-Backbone-swap experiment (Reviewer #7, Comment 2): PANNs / YAMNet / HuBERT,
-each frozen with an identical trainable binary QA head, trained with the
-Variable-Noise (U[0,10]) strategy only (matches the unfreezing ablation's
-scope -- CLAUDE.md Sec 9.2 explicitly says not to re-run all three
-strategies per backbone) and evaluated across all 10 lambda test levels.
+Backbone-swap experiment (Reviewer #7, Comment 2): PANNs CNN14 / YAMNet /
+HuBERT, each with the identical trainable binary QA head from
+backbone_qa_model.py, trained with the Variable-Noise (lambda ~ U[0, 10])
+strategy and evaluated across the full lambda sweep. Only the variable-noise
+strategy is run per backbone; the clean-only and fixed-noise strategies are
+covered for AST in the published Figure 3 and are not re-run here.
 
-This is a near-clone of two existing scripts, stitched together:
-  - reproducibility/src/train_three_strategies_cv.py's 'noise_0_10' branch
-    (variable-noise training: 1 clean + 1 mixed-at-random-lambda-in-[0,10]
-    per heart file, balanced with noise-only samples) for the TRAIN split.
-  - reproducibility/src/train_per_lambda_cv.py's PerLambdaDataset (fixed
-    test lambda) for the EVAL split, one pass per lambda in the sweep.
-load_audio / mix_rms / get_noise below are copied verbatim from
-train_per_lambda_cv.py -- same audio pipeline every other method in this
-revision (AST-QA itself, Tang, Giordano) is evaluated on. The ONLY change:
-instead of an ASTFeatureExtractor mel-spectrogram + frozen AST transformer +
-trainable head, the raw waveform goes straight into whichever backbone
-(PANNs/YAMNet/HuBERT) is selected via --backbone, each frozen, with an
-identical head attached (backbone_qa_model.py).
+The pipeline is assembled from the two training scripts of the original
+package so that the audio handling is identical to the published results:
+  - the 'noise_0_10' branch of ../../../src/train_three_strategies_cv.py for
+    the TRAIN split (per heart recording: one clean and one mixed sample at a
+    lambda drawn uniformly from [0, 10], balanced with noise-only negatives);
+  - the fixed-test-lambda PerLambdaDataset of
+    ../../../src/train_per_lambda_cv.py for the EVAL split, evaluated once
+    per lambda in the sweep.
+load_audio / mix_rms / get_noise are copied verbatim from
+train_per_lambda_cv.py, so every method compared in this package sees exactly
+the same waveforms. The single substitution is the encoder: instead of an
+ASTFeatureExtractor mel-spectrogram feeding the AST transformer, the
+preprocessed waveform goes directly into the backbone selected by --backbone,
+which applies its own front-end internally (see backbones.py).
 
-Fold count: 5-fold (KFold(n_splits=5, shuffle=True, random_state=42), same
-construction as ../fold_assignments/patient_folds_5fold.csv) -- the
-documented deviation from the published 10-fold, per CLAUDE.md Sec 9.4.
+Patient-level grouping: heart recordings are named {patient_id}_{valve}.wav,
+so the patient id is the filename prefix before the first underscore. Folds
+are formed over unique patient ids, never over individual files, so every
+recording from a patient falls entirely within either the training or the
+test side of a fold.
 
 Output layout matches the Tang/Giordano baselines for direct comparability:
-  raw_predictions/lambda_X/fold_Y/predictions.csv  (filename, y_true, probs)
-  backbone_swap_progress.json, backbone_swap_metrics.csv
+  raw_predictions/lambda_<L>/fold_<K>/predictions.csv  (filename, y_true, probs)
+  backbone_swap_progress.json      (incremental, rewritten after each fold)
+  backbone_swap_final_results.json (per-lambda mean and 95% CI across folds)
+  backbone_swap_metrics_<backbone>[_<mode>].csv
 
-GPU-heavy -- this is meant to run as a Vertex AI job once L4 quota is
-approved (see ../../cloud_pipeline/). DO NOT submit to Vertex without
-explicit confirmation. Use --limit_patients / --n_folds 3 / --epochs 1 for
-local CPU smoke-testing only.
+Training is GPU-heavy; --unfreeze_mode full in particular backpropagates
+through the whole backbone. --limit_patients, a small --n_folds and --epochs 1
+give a fast CPU smoke test. The --gcs_bucket / --data_prefix / --output_prefix
+flags drive the cloud pipeline the reported results were produced on and
+default to off for local reproduction.
+
+See ../../README.md for the fold counts and other settings used for the
+results checked into this package.
 
 Usage:
-    python train_backbone_swap_cv.py --backbone panns \
-        --data_dir ../../../data_processed/ --output_dir ../results/panns/ \
-        --n_folds 5 --seed 42
+    python train_backbone_swap_cv.py --backbone panns --unfreeze_mode frozen \
+        --data_dir ../../../dataset/ \
+        --output_dir ../../results/reviewer7_backbone_swap/panns/ \
+        --n_folds 3 --epochs 5 --seed 42
 """
 
 import argparse
@@ -80,11 +91,20 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-# --- verbatim block, copied from reproducibility/src/train_per_lambda_cv.py ---
-# (same audio pipeline AST-QA, Tang, and Giordano are all evaluated on --
-# must stay byte-identical)
+# --- Verbatim block, copied from ../../../src/train_per_lambda_cv.py. ---
+# This is the audio pipeline AST-QA, Tang, and Giordano are all evaluated on;
+# it must stay byte-identical across scripts so that the only difference
+# between methods is the model, not the waveforms.
 def load_audio(path):
-    """Load and preprocess a single audio file."""
+    """Load one recording and apply the shared preprocessing chain.
+
+    Resamples to 16 kHz mono, removes the DC offset, applies a 20 Hz
+    second-order high-pass and a 1 kHz fifth-order low-pass (Butterworth,
+    SOS form), peak-normalizes to [-1, 1], then crops or loop-pads with
+    np.tile to exactly 10 s (160000 samples).
+
+    Returns None for unreadable, near-empty, or effectively silent files.
+    """
     try:
         wav, _ = librosa.load(path, sr=TARGET_SR, mono=True)
     except Exception:
@@ -109,7 +129,13 @@ def load_audio(path):
 
 
 def mix_rms(heart, noise, lam):
-    """Mix heart sound with noise at a given lambda using RMS-based scaling."""
+    """Mix a heart sound with noise at intensity lambda, RMS energy-matched.
+
+    Implements Eq. 2 of the paper: the noise is rescaled so its RMS matches
+    the heart sound's before being added at weight lambda, so lambda = 1
+    corresponds to 0 dB SNR regardless of the absolute level of either
+    recording. The result is rescaled if it would otherwise clip beyond 1.0.
+    """
     if lam == 0:
         return heart
     rms_h = np.sqrt(np.mean(heart ** 2))
@@ -126,8 +152,19 @@ def mix_rms(heart, noise, lam):
 
 
 def get_noise(icbhi_files, env_files, idx=None):
-    """Structured noise: lung + 0.5*env, peak-normalized -- identical
-    formula to train_per_lambda_cv.py's PerLambdaDataset.get_noise."""
+    """Build one composite structured-noise waveform (Eq. 1 of the paper):
+    an ICBHI lung recording plus 0.5x an ESC-50/UrbanSound8K environmental
+    clip, peak-normalized. Same formula as
+    PerLambdaDataset.get_noise in train_per_lambda_cv.py.
+
+    idx: when given, the two source clips are chosen from a per-item seeded
+    RNG (random.Random(42 + idx)), which makes the evaluation sets
+    deterministic and identical across backbones and across runs. When None
+    (used for training samples) the global RNG is used, so the noise drawn
+    varies from epoch to epoch as intended for augmentation.
+
+    Returns silence if either source clip fails to load.
+    """
     if idx is not None:
         rng = random.Random(42 + idx)
     else:
@@ -144,10 +181,19 @@ def get_noise(icbhi_files, env_files, idx=None):
 
 
 class VariableNoiseTrainDataset(Dataset):
-    """Variable-noise (U[0,10]) training set -- identical construction to
-    ThreeStrategyDataset's 'noise_0_10' branch in train_three_strategies_cv.py,
-    minus the AST-specific feature-extractor step (returns a raw waveform
-    tensor so any backbone's own front-end can do its own thing)."""
+    """Variable-noise (lambda ~ U[0, 10]) training set.
+
+    Same construction as the 'noise_0_10' branch of ThreeStrategyDataset in
+    train_three_strategies_cv.py: each heart recording contributes one clean
+    and one noise-mixed positive sample, and an equal number of noise-only
+    negatives is added, giving a balanced 50/50 label distribution. The
+    mixing lambda is redrawn from U[0, 10] on every __getitem__ call, so a
+    recording is seen at many noise levels over the course of training.
+
+    The only difference from the AST version is that this returns the raw
+    waveform instead of AST feature-extractor output, leaving each backbone
+    to apply its own front-end.
+    """
 
     def __init__(self, heart_files, icbhi_files, env_files):
         self.icbhi_files = icbhi_files
@@ -186,9 +232,19 @@ class VariableNoiseTrainDataset(Dataset):
 
 
 class FixedLambdaEvalDataset(Dataset):
-    """Fixed test-lambda eval set -- identical construction to
-    train_per_lambda_cv.py's PerLambdaDataset, minus the AST-specific
-    feature-extractor step."""
+    """Evaluation set at a single fixed test lambda.
+
+    Same construction as PerLambdaDataset in train_per_lambda_cv.py, minus
+    the AST feature-extractor step. Length is 2x the number of heart
+    recordings: indices below len(self.data) are heart recordings mixed at
+    `lambda_val` (label 1), and indices at or above it are noise-only
+    negatives (label 0), keeping the test set balanced. Noise selection is
+    seeded per index, so the same waveforms are used for every backbone.
+
+    The emitted `filename` is the source path for positives and the literal
+    string "noise" for negatives; the significance scripts rely on this
+    column to align predictions row-for-row across methods.
+    """
 
     def __init__(self, heart_files, icbhi_files, env_files, lambda_val):
         self.heart_files = heart_files
@@ -220,9 +276,10 @@ class FixedLambdaEvalDataset(Dataset):
         }
 
 
-# --- GCS helpers, copied verbatim from phase6_paper_quality/src/train_quality_vertexai.py
-# (established convention for this repo's Vertex AI jobs: explicit download/upload via
-# the google-cloud-storage client, not a FUSE mount) ---
+# --- Cloud-storage helpers, used only when --gcs_bucket is given.
+# The cloud training jobs stage data with explicit downloads/uploads through
+# the google-cloud-storage client rather than a FUSE mount, which keeps I/O
+# predictable on preemptible instances. Local reproduction does not use these.
 def download_from_gcs(bucket_name, prefix, local_dir):
     from google.cloud import storage
     logger.info(f"Downloading from gs://{bucket_name}/{prefix} -> {local_dir}")
@@ -254,15 +311,21 @@ def upload_to_gcs(bucket_name, local_dir, prefix):
             blob_path = f"{prefix}/{rel}"
             bucket.blob(blob_path).upload_from_filename(local_path)
     logger.info(f"Uploaded {local_dir} -> gs://{bucket_name}/{prefix}")
-# --- end GCS helpers ---
+# --- end cloud-storage helpers ---
 
 
 def build_optimizer(model, unfreeze_mode, head_lr, backbone_lr):
-    """Two-group AdamW when the backbone is unfrozen too -- head at head_lr,
-    backbone at the lower backbone_lr, mirroring
-    ../../reviewer1_unfreezing_ablation/src/train_unfreezing_ablation_cv.py's
-    build_optimizer (CLAUDE.md Sec 9.1 Comment 2's "lower learning rate,
-    1e-5 or 5e-5" guidance for full unfreezing)."""
+    """Build the AdamW optimizer for the requested unfreeze mode.
+
+    In 'frozen' mode only the head's parameters are passed to the optimizer.
+    In 'full' mode two parameter groups are used, with the head at head_lr
+    and the backbone at the lower backbone_lr; a reduced backbone learning
+    rate is the standard precaution against catastrophic forgetting when
+    fine-tuning a large pretrained encoder on a small dataset. This mirrors
+    build_optimizer in
+    ../reviewer1_unfreezing_ablation/train_unfreezing_ablation_cv.py so that
+    the AST and backbone-swap fine-tuning runs use the same schedule.
+    """
     if unfreeze_mode == "frozen":
         return torch.optim.AdamW(model.qa_classifier.parameters(), lr=head_lr)
     return torch.optim.AdamW([
@@ -273,6 +336,11 @@ def build_optimizer(model, unfreeze_mode, head_lr, backbone_lr):
 
 def train_model(backbone_name, unfreeze_mode, train_loader, fold, device, epochs=5,
                  head_lr=1e-4, backbone_lr=5e-5):
+    """Train one fold from scratch and return the fitted model.
+
+    A fresh BackboneQAHead is built per fold so that no information leaks
+    between folds. Loss is BCEWithLogits on the balanced usable/noise labels.
+    """
     logger.info(f"  --> [Train] backbone={backbone_name} mode={unfreeze_mode}, fold={fold}")
     model = BackboneQAHead(backbone_name, freeze_backbone=(unfreeze_mode == "frozen")).to(device)
     optimizer = build_optimizer(model, unfreeze_mode, head_lr, backbone_lr)
@@ -295,6 +363,14 @@ def train_model(backbone_name, unfreeze_mode, train_loader, fold, device, epochs
 
 
 def compute_metrics(y_true, probs):
+    """Compute the six metrics reported throughout the paper.
+
+    Threshold-free: AUROC and AUPRC. At the fixed 0.5 decision threshold:
+    accuracy, F1, sensitivity (recall for usable recordings) and specificity
+    (recall for noise). AUROC/AUPRC fall back to chance-level values if a
+    subset happens to contain a single class, which sklearn treats as
+    undefined.
+    """
     preds = (probs > 0.5).astype(int)
     try:
         auroc = roc_auc_score(y_true, probs)
@@ -317,6 +393,15 @@ def compute_metrics(y_true, probs):
 
 
 def evaluate_fold(model, hearts, icbhi, env, device, batch_size, output_dir, fold, lambdas):
+    """Evaluate one trained fold model across the whole lambda sweep.
+
+    One fixed-lambda test set is built per lambda from the same held-out
+    patients, so a single model is scored at every noise level. Per-recording
+    predictions are written to
+    raw_predictions/lambda_<L>/fold_<K>/predictions.csv before aggregation,
+    so that every reported number can be recomputed from raw output.
+    Returns a dict mapping lambda to its metric dict.
+    """
     per_lambda_metrics = {}
     for lam in lambdas:
         ds = FixedLambdaEvalDataset(hearts, icbhi, env, lam)
@@ -350,9 +435,8 @@ def main():
     parser = argparse.ArgumentParser(description="Backbone-swap experiment (Reviewer #7, Comment 2)")
     parser.add_argument("--backbone", type=str, required=True, choices=["panns", "yamnet", "hubert"])
     parser.add_argument("--unfreeze_mode", type=str, default="frozen", choices=["frozen", "full"],
-                         help="frozen (default, Reviewer #7 Comment 2's original ask) or full "
-                              "(also unfreeze the backbone -- 2026-09-14 follow-up ablation, see "
-                              "../README.md 'Full-unfreeze extension')")
+                         help="frozen: train only the QA head on fixed backbone features. "
+                              "full: fine-tune the backbone end to end as well, at --backbone_lr.")
     parser.add_argument("--data_dir", type=str, default=None,
                          help="Local data dir. Required unless --gcs_bucket is set.")
     parser.add_argument("--output_dir", type=str, default=None,
@@ -364,7 +448,8 @@ def main():
     parser.add_argument("--output_prefix", type=str, default=None,
                          help="Defaults to results/backbone_swap/<backbone>/")
     parser.add_argument("--n_folds", type=int, default=5,
-                         help="5-fold per this revision's documented deviation (CLAUDE.md Sec 9.4)")
+                         help="Number of patient-level CV folds. See ../../README.md for the "
+                              "fold count used for the results checked into this package.")
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--head_lr", type=float, default=1e-4)
@@ -402,6 +487,8 @@ def main():
         output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
 
+    # File lists are sorted so that the fold split and the per-index noise
+    # seeding are reproducible independently of filesystem traversal order.
     data_root = Path(data_dir)
     heart_files = sorted(list(data_root.rglob("PhysioNet2022/**/*.wav")))
     icbhi_files = sorted(list(data_root.rglob("ICBHI2017/**/*.wav")))
@@ -410,6 +497,10 @@ def main():
     if not heart_files:
         raise ValueError(f"No heart audio files found in {data_dir}")
 
+    # Group recordings by patient id -- the filename prefix before the first
+    # underscore, e.g. 13918_AV.wav -> 13918. Cross-validation is performed
+    # over these ids, never over individual files, which is what prevents
+    # recordings from the same patient appearing in both train and test.
     patient_map = {}
     for f in heart_files:
         pid = f.name.split("_")[0]
@@ -431,6 +522,12 @@ def main():
         train_hearts = [f for p in train_pids for f in patient_map[p]]
         test_hearts = [f for p in test_pids for f in patient_map[p]]
 
+        # The noise corpora are split per fold as well (80% train / 20% test),
+        # so the interfering lung and environmental recordings used to build
+        # the test set are never the ones seen during training. The shuffle is
+        # seeded per fold for reproducibility, and matches the construction
+        # used by the AST unfreezing ablation so the two experiments' test
+        # sets line up recording for recording.
         rng = random.Random(args.seed + fold)
         tr_icbhi = sorted(list(icbhi_files))
         tr_env = sorted(list(env_files))
@@ -461,11 +558,13 @@ def main():
                        "folds_done": fold + 1, "per_fold": all_fold_metrics}, f, indent=2)
 
         if args.gcs_bucket:
-            # Upload after every fold, not just at the end -- if a preemptible/spot
-            # job gets killed mid-run, completed folds' raw predictions are already
-            # safe in GCS instead of lost with the container.
+            # Upload after every fold rather than only at the end: on
+            # preemptible instances a job killed mid-run would otherwise lose
+            # the raw predictions of the folds it had already finished.
             upload_to_gcs(args.gcs_bucket, output_dir, output_prefix.rstrip("/"))
 
+    # Aggregate across folds: per-lambda mean of each metric with a
+    # normal-approximation 95% half-width (1.96 * SD / sqrt(n_folds)).
     final_results = {}
     for lam in lambdas:
         metrics = [fold[lam] for fold in all_fold_metrics]

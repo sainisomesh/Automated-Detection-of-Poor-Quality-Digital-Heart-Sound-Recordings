@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
-"""Generate 5-fold patient-level assignments for PAPER_REVISIONS experiments.
+"""Generate patient-level cross-validation fold assignments.
 
-Mirrors reproducibility/src/generate_fold_assignments.py exactly (same patient-level
-grouping, same seed=42) but with n_splits=5 instead of 10, per the explicit decision
-to trade fold count for compute budget on the revision experiments. See
-PAPER_REVISIONS/README.md for why this is a deliberate, documented deviation from the
-10-fold splits used in the published Table 2.
+Splitting is done over unique patient identifiers rather than over individual
+recordings, so that every recording from a given patient falls in exactly one
+test fold. This is what prevents the same patient appearing in both the
+training and test set of a fold, which would leak patient-specific acoustic
+characteristics and inflate measured performance.
+
+The patient identifier is the portion of the filename before the first
+underscore: 13918_AV.wav, 13918_MV.wav, 13918_PV.wav and 13918_TV.wav are four
+auscultation sites from patient 13918 and always travel together.
+
+Usage:
+    python generate_5fold_assignments.py [data_dir] [n_splits]
+
+Writes patient_folds_<n_splits>fold.csv next to this script. Uses a fixed
+random_state so the split is reproducible; the checked-in CSVs were produced
+with the defaults below.
 """
 
 import os
@@ -15,7 +26,7 @@ from sklearn.model_selection import KFold
 import pandas as pd
 
 def main():
-    data_dir = sys.argv[1] if len(sys.argv) > 1 else "../../data_processed/"
+    data_dir = sys.argv[1] if len(sys.argv) > 1 else "../../dataset/"
     n_splits = int(sys.argv[2]) if len(sys.argv) > 2 else 5
     data_root = Path(data_dir)
     heart_files = sorted(list(data_root.rglob("PhysioNet2022/**/*.wav")))

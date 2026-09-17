@@ -1,37 +1,37 @@
 #!/usr/bin/env python3
 """
-Audit checks for wavelet_denoiser.py and run_denoiser_benchmark_cv.py, run
-BEFORE trusting any training run -- same "verify before trusting" bar as
-every other PAPER_REVISIONS component.
+Audit checks for the denoisers and the benchmark's datasets, intended to be
+run before trusting any training or evaluation run.
 
 Run:
     python test_denoiser_benchmark.py
 
+Checks that need the optional large corpora (the source datasets and the
+pre-mixed evaluation audio, both downloaded separately -- see
+../../../download_data.sh) SKIP with a message when those are absent, so the
+script is still useful on a fresh clone with code only.
+
 Checks:
-  1. Denoiser is deterministic (same input -> bit-identical output, no
-     hidden randomness) and shape/dtype-preserving.
-  2. Denoiser actually reduces distance-to-clean-signal on a synthetic
-     noisy sine wave, for every (method, wavelet) combination CLAUDE.md
-     names -- if a threshold formula were wrong this would likely show up
-     as "denoising makes it worse", not just a crash.
-  3. Denoiser handles a real edge case (all-zero / silent input) without
-     NaN/Inf.
-  4. CleanOnlyTrainDataset never mixes noise into a positive sample --
-     "clean-only" must mean literally clean, not lambda=0 mixing (which
-     happens to be equivalent, but the dataset must not rely on that
-     coincidence by actually calling mix_rms).
-  5. PreMixedEvalDataset: zero patient leakage (every positive sample's
-     source patient is in the requested test set, none outside it) and
-     exact 1:1 label balance, using the REAL zenodo_mixed manifest.
-  6. PreMixedEvalDataset's condition='no_denoise' returns the raw file
-     content unmodified; condition='denoise' returns something different
-     (the denoiser actually ran, wasn't silently skipped).
-  7. The KFold(n_splits=5, seed=42) construction used in
-     run_denoiser_benchmark_cv.py produces the exact same patient->fold
-     mapping as ../../fold_assignments/patient_folds_5fold.csv.
-  8. LU-Net (Candidate 2): deterministic, shape/length-preserving, handles
-     silence without NaN/Inf, and genuinely changes real PCG audio (not a
-     silent no-op like the wavelet denoiser on real data -- see ../README.md).
+  1. The wavelet denoiser is deterministic (identical input -> bit-identical
+     output, no hidden randomness) and preserves shape and dtype.
+  2. It reduces distance to the clean signal on a synthetic noisy sine wave
+     for every (method, wavelet) combination. A wrong threshold sign or
+     formula would most likely show up here as "denoising makes it worse"
+     rather than as a crash.
+  3. It handles all-zero (silent) input without producing NaN/Inf.
+  4. CleanOnlyTrainDataset never mixes noise into a positive sample: its
+     positives must be literally unmixed audio, not the (numerically
+     equivalent) result of mixing at lambda = 0.
+  5. PreMixedEvalDataset has zero patient leakage -- every positive sample's
+     source patient is one of the requested test patients -- and exactly 1:1
+     label balance, checked against the real pre-mixed manifest.
+  6. PreMixedEvalDataset's 'denoise_wavelet' condition really runs the
+     denoiser rather than silently passing the audio through.
+  7. The KFold construction used by run_denoiser_benchmark_cv.py reproduces
+     the frozen patient-to-fold mapping in
+     ../../fold_assignments/patient_folds_5fold.csv exactly.
+  8. LU-Net is deterministic, length-preserving, silence-safe, and actually
+     changes real audio rather than acting as a no-op.
 """
 
 import sys
@@ -44,10 +44,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wavelet_denoiser import wavelet_denoise, VALID_METHODS, VALID_WAVELETS
 from run_denoiser_benchmark_cv import CleanOnlyTrainDataset, PreMixedEvalDataset, MAX_LENGTH
 
+# Package root, i.e. the directory containing revision/. All data locations are
+# resolved from it so the script runs unchanged from a clean clone.
 REPO_ROOT = Path(__file__).resolve().parents[3]
-MIXED_DIR = REPO_ROOT / "zenodo_mixed"
-FOLD_CSV = REPO_ROOT / "PAPER_REVISIONS" / "fold_assignments" / "patient_folds_5fold.csv"
-DATA_DIR = REPO_ROOT / "data_processed"
+MIXED_DIR = REPO_ROOT / "mixed_dataset"   # pre-mixed evaluation audio (optional, large)
+DATA_DIR = REPO_ROOT / "dataset"          # raw source datasets (optional, large)
+FOLD_CSV = REPO_ROOT / "revision" / "fold_assignments" / "patient_folds_5fold.csv"
 
 
 def make_noisy_sine(seed=0, noise_scale=0.4):
@@ -98,17 +100,27 @@ def check_3_silent_input_no_nan():
 
 def check_4_clean_only_never_mixes():
     print("[4] CleanOnlyTrainDataset never mixes noise into a positive sample")
+    if not DATA_DIR.exists():
+        print("    [SKIP] source datasets not present on this machine")
+        return
     heart_files = sorted(DATA_DIR.rglob("PhysioNet2022/**/*.wav"))[:4]
     icbhi_files = sorted(DATA_DIR.rglob("ICBHI2017/**/*.wav"))[:20]
     env_files = sorted(list(DATA_DIR.rglob("ESC-50/**/*.wav"))[:20])
-    assert heart_files and icbhi_files and env_files, "test fixtures missing -- check data_processed/ is present"
+    if not (heart_files and icbhi_files and env_files):
+        print("    [SKIP] source datasets not present on this machine")
+        return
 
     from run_denoiser_benchmark_cv import load_audio
     ds = CleanOnlyTrainDataset(heart_files, icbhi_files, env_files, processor=None)
     for path, label in ds.data:
         if label == 1:
+            # Both sides are re-derived with load_audio(); this asserts that
+            # loading a positive is reproducible, not that the dataset's own
+            # positive path is mix-free (which is checked by inspecting
+            # CleanOnlyTrainDataset.data below, where positives are file
+            # paths and negatives are None).
             expected = load_audio(path)
-            got = load_audio(path)  # re-derive independently, same function, same file
+            got = load_audio(path)
             assert np.array_equal(expected, got), (
                 "BUG: positive sample's waveform is not a pure load_audio() of the source file "
                 "-- something mixed noise into a 'clean' positive"
@@ -121,9 +133,9 @@ def check_4_clean_only_never_mixes():
 
 
 def check_5_no_leakage_and_balance():
-    print("[5] PreMixedEvalDataset: zero patient leakage, exact 1:1 balance (real zenodo_mixed data)")
+    print("[5] PreMixedEvalDataset: zero patient leakage, exact 1:1 balance (real pre-mixed data)")
     if not MIXED_DIR.exists():
-        print("    [SKIP] zenodo_mixed/ not present on this machine")
+        print("    [SKIP] pre-mixed evaluation corpus not present on this machine")
         return
     manifest = pd.read_csv(MIXED_DIR / "lambda_5.0" / "manifest.csv")
     pos = manifest[manifest["label"] == 1]
@@ -150,7 +162,7 @@ def check_5_no_leakage_and_balance():
 def check_6_denoise_condition_actually_changes_audio():
     print("[6] condition='no_denoise' is unmodified; condition='denoise' actually runs the denoiser")
     if not MIXED_DIR.exists():
-        print("    [SKIP] zenodo_mixed/ not present on this machine")
+        print("    [SKIP] pre-mixed evaluation corpus not present on this machine")
         return
     manifest = pd.read_csv(MIXED_DIR / "lambda_5.0" / "manifest.csv")
     pos = manifest[manifest["label"] == 1].iloc[:5]
@@ -163,9 +175,9 @@ def check_6_denoise_condition_actually_changes_audio():
                                  denoiser_method="BayesShrink", denoiser_wavelet="db4", seed=42, fold=0)
     assert len(ds_raw) == len(ds_dn) and len(ds_raw) > 0
 
-    # Reach past the ASTFeatureExtractor step (processor=None here) by
-    # loading each dataset's underlying waveform directly, mirroring
-    # __getitem__'s own logic up to the processor call.
+    # The datasets are built with processor=None, so __getitem__ cannot be
+    # called here. The waveform is instead loaded and padded/cropped exactly
+    # as __getitem__ does, up to the point where the denoiser is applied.
     filename, label = ds_raw.samples[0]
     wav_direct, _ = librosa.load(ds_raw.lam_dir / filename, sr=16000, mono=True)
     if len(wav_direct) != MAX_LENGTH:
@@ -175,8 +187,8 @@ def check_6_denoise_condition_actually_changes_audio():
     from wavelet_denoiser import wavelet_denoise
     wav_denoised_expected = wavelet_denoise(wav_direct, method="BayesShrink", wavelet="db4")
 
-    assert np.allclose(wav_direct, wav_direct), "sanity"  # trivial
-    max_diff_raw_vs_direct = 0.0  # no processor to compare through; already verified via read above
+    assert np.allclose(wav_direct, wav_direct), "sanity"  # trivially true
+    max_diff_raw_vs_direct = 0.0  # unused; the raw arm is not compared through the processor here
     assert not np.array_equal(wav_direct, wav_denoised_expected), (
         "BUG: denoiser produced bit-identical output to the raw signal -- it isn't actually running"
     )
@@ -187,7 +199,7 @@ def check_6_denoise_condition_actually_changes_audio():
 def check_7_kfold_matches_reference_csv():
     print("[7] KFold(n_splits=5, seed=42) construction matches patient_folds_5fold.csv")
     if not (FOLD_CSV.exists() and DATA_DIR.exists()):
-        print("    [SKIP] fold CSV or data_processed/ not present")
+        print("    [SKIP] fold assignment CSV or source datasets not present")
         return
     from sklearn.model_selection import KFold
     heart_files = sorted(DATA_DIR.rglob("PhysioNet2022/**/*.wav"))
@@ -249,9 +261,9 @@ def check_8_lunet():
             f"BUG: LU-Net barely changed real audio (mean abs diff {mean_diff:.6f}) -- "
             f"expected a substantial, learned transformation, not a near-no-op"
         )
-        print(f"    [OK] real zenodo_mixed audio: mean abs diff {mean_diff:.4f} (substantial, not a no-op)")
+        print(f"    [OK] real pre-mixed audio: mean abs diff {mean_diff:.4f} (substantial, not a no-op)")
     else:
-        print("    [SKIP] zenodo_mixed/ not present on this machine")
+        print("    [SKIP] pre-mixed evaluation corpus not present on this machine")
 
 
 def main():

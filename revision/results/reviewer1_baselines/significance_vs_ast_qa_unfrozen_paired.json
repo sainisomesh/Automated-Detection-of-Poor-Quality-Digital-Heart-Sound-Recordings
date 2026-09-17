@@ -1,6 +1,6 @@
 {
-  "methodology_note": "GENUINELY PAIRED comparison -- AST-QA is the full-unfreeze, variable-noise (U[0,10]) trained, 5-fold model from PAPER_REVISIONS/reviewer1_unfreezing_ablation/results/full_5fold_variable/, NOT the originally-published frozen 10-fold model (see compute_significance.py / significance_vs_ast_qa.json for that disclosed-unpaired comparison, kept separately, not superseded). Verified byte-for-byte (2026-09-16) that Tang/Giordano and this AST-QA model score the exact same test files per fold per lambda, enabling row-level pairing: paired bootstrap (same resample indices applied to both methods) and a proper paired Student's t-test (scipy.stats.ttest_rel) on matched per-fold AUROCs.",
-  "ast_qa_source": "PAPER_REVISIONS/reviewer1_unfreezing_ablation/results/full_5fold_variable/",
+  "methodology_note": "PAIRED comparison -- AST-QA here is the fully fine-tuned (unfrozen backbone), variable-noise (U[0,10]) trained, 5-fold model from revision/results/reviewer1_unfreezing_ablation/full_5fold_variable/, not the originally published frozen 10-fold model (see compute_significance.py / significance_vs_ast_qa.json for that unpaired comparison, which is kept separately and not superseded). Tang/Giordano and this AST-QA model score the same held-out files per fold per lambda, which enables row-level pairing: a paired bootstrap (the same resample indices applied to both methods) and a paired Student's t-test (scipy.stats.ttest_rel) on matched per-fold AUROCs.",
+  "ast_qa_source": "revision/results/reviewer1_unfreezing_ablation/full_5fold_variable/",
   "bootstrap_iterations": 1000,
   "n_folds": 5,
   "seed": 42,

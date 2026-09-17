@@ -1,35 +1,46 @@
 #!/usr/bin/env python3
 """
-Sanity checks for backbones.py / backbone_qa_model.py, run BEFORE trusting
-any training run. Mirrors the same "verify before trusting" bar used for
-tang_features.py / giordano_snr.py (test_tang_features.py, test_giordano_snr.py).
+Audit checks for backbones.py and backbone_qa_model.py, intended to be run
+before any training run is trusted. They verify the properties the
+backbone-swap comparison depends on, using synthetic waveforms only (no
+dataset required), and they are assertions rather than a report: the script
+exits non-zero on the first violation.
 
-Run one backbone at a time (each downloads a real pretrained checkpoint):
+Run one backbone at a time, since each loads a real pretrained checkpoint:
     python test_backbones.py --backbone panns
     python test_backbones.py --backbone yamnet
     python test_backbones.py --backbone hubert
 
-Checks (frozen mode, the original Reviewer #7 Comment 2 ask):
-  1. Backbone loads, produces the declared embedding_dim, no NaN/Inf.
-  2. Every backbone parameter has requires_grad=False.
-  3. REGRESSION TEST for the BatchNorm/SpecAugment-in-train-mode bug caught
-     while writing backbones.py: calling composite_model.train() (as the
-     real training loop does every epoch) must NOT change the backbone's
-     output for the same input -- i.e. the backbone must stay eval-locked.
-  4. Two acoustically different inputs (silence vs. structured noise)
-     produce different embeddings (backbone isn't just returning a constant).
-  5. Head forward/backward works and only qa_classifier parameters receive
-     gradients.
+Frozen mode:
+  1. The backbone loads and produces embeddings of the declared
+     embedding_dim, with no NaN or Inf.
+  2. No backbone parameter is trainable.
+  3. Calling composite_model.train(), as the training loop does at the start
+     of every epoch, leaves the backbone in eval mode and leaves its output
+     for a fixed input unchanged. This is the property that makes the frozen
+     comparison meaningful: BatchNorm running statistics (PANNs, YAMNet) and
+     SpecAugment/dropout (HuBERT) are gated on nn.Module.training, not on
+     requires_grad, so without the eval lock in backbones.py a "frozen"
+     backbone would still drift and inject masking noise.
+  4. Acoustically different inputs (silence versus broadband noise) give
+     different embeddings, i.e. the wrapper is not returning a constant.
+  5. Forward and backward work end to end and gradients reach only the
+     qa_classifier head.
 
-Checks (full-unfreeze mode, added 2026-09-14 for the "does AST only win
-because of frozen features?" follow-up -- see ../README.md "Full-unfreeze
-extension"):
-  6. Every backbone parameter has requires_grad=True.
-  7. composite_model.train() actually puts the backbone in train mode this
-     time (the exact opposite of check 3 -- confirms freeze=False doesn't
-     accidentally still eval-lock it).
-  8. Backward pass reaches every backbone parameter (grad is not None and
-     not all-zero for at least one param), not just qa_classifier.
+Full fine-tuning mode:
+  6. Backbone parameters are trainable. Not all of them: each wrapper keeps
+     its fixed, non-learnable front-end frozen by design, so the check is
+     that a non-zero subset is trainable.
+  7. train() and eval() now cascade into the backbone -- the inverse of
+     check 3, confirming the eval lock is not applied when it should not be.
+  8. A backward pass reaches backbone parameters, and their gradient sum is
+     of a plausible magnitude. An implausibly large value indicates that a
+     fixed DSP transform (such as PANNs' mel filterbank) was unfrozen by
+     mistake, which produces gradients many orders of magnitude larger than
+     any genuinely learnable layer.
+  9. The unfrozen backbone still honours an ambient torch.no_grad() context
+     instead of forcing gradients on, so evaluation does not build unused
+     autograd graphs.
 """
 
 import argparse
@@ -46,6 +57,12 @@ MAX_LENGTH = 16000 * 10
 
 
 def make_wav(kind, seed=0):
+    """Build a deterministic 10 s, 16 kHz synthetic test waveform.
+
+    'silence' is all zeros, 'noise' is uniform broadband noise, and 'tone' is
+    an 80 Hz sinusoid, which sits in the frequency range the pipeline's
+    20-1000 Hz bandpass preserves for heart sounds.
+    """
     rng = np.random.default_rng(seed)
     if kind == "silence":
         wav = np.zeros(MAX_LENGTH, dtype=np.float32)
@@ -60,6 +77,7 @@ def make_wav(kind, seed=0):
 
 
 def run_checks(backbone_name):
+    """Run the frozen-mode checks (1-5) for one backbone."""
     print(f"=== Testing backbone: {backbone_name} ===")
     model = BackboneQAHead(backbone_name)
     model.eval()
@@ -78,20 +96,21 @@ def run_checks(backbone_name):
     n_trainable_head = sum(p.numel() for p in model.qa_classifier.parameters() if p.requires_grad)
     print(f"  [OK] backbone frozen (0 trainable params), head has {n_trainable_head} trainable params")
 
-    # --- Check 3: regression test for the train()-mode leak bug ---
+    # --- Check 3: the frozen backbone stays eval-locked under model.train() ---
     with torch.no_grad():
         emb_before = model.backbone(batch).clone()
-    model.train()  # this is what the real training loop calls every epoch
+    model.train()  # what the training loop calls at the start of every epoch
     assert model.backbone.training is False, (
-        "BUG: backbone.training is True after model.train() -- the eval-lock override "
-        "in backbones.py is not working, BatchNorm/SpecAugment would corrupt frozen embeddings"
+        "backbone.training is True after model.train() -- the eval-lock override "
+        "in backbones.py is not working, so BatchNorm/SpecAugment would alter "
+        "supposedly frozen embeddings"
     )
     with torch.no_grad():
         emb_after = model.backbone(batch).clone()
     model.eval()
     max_diff = (emb_before - emb_after).abs().max().item()
     assert max_diff < 1e-5, (
-        f"BUG: backbone output changed after model.train() (max diff {max_diff}) -- "
+        f"backbone output changed after model.train() (max diff {max_diff}) -- "
         f"the backbone is not actually frozen/eval-locked"
     )
     print(f"  [OK] backbone.training stays False and output is identical after model.train() "
@@ -110,7 +129,7 @@ def run_checks(backbone_name):
     loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, labels)
     loss.backward()
     for name, p in model.backbone.named_parameters():
-        assert p.grad is None, f"BUG: gradient flowed into frozen backbone param {name}"
+        assert p.grad is None, f"gradient flowed into frozen backbone param {name}"
     head_grad_norm = sum(p.grad.abs().sum().item() for p in model.qa_classifier.parameters() if p.grad is not None)
     assert head_grad_norm > 0, "no gradient reached the trainable head"
     print(f"  [OK] no gradient in backbone params, head gradient norm={head_grad_norm:.4f}")
@@ -119,29 +138,29 @@ def run_checks(backbone_name):
 
 
 def run_unfrozen_checks(backbone_name):
+    """Run the full-fine-tuning-mode checks (6-9) for one backbone."""
     print(f"=== Testing backbone (full-unfreeze mode): {backbone_name} ===")
     model = BackboneQAHead(backbone_name, freeze_backbone=False)
 
     # --- Check 6: backbone actually trainable ---
-    # NOT asserting ALL params trainable here: PANNs deliberately re-locks its
-    # fixed torchlibrosa DSP front-end (spectrogram/mel-filterbank matrices)
-    # and its unused original AudioSet head even in full-unfreeze mode -- see
-    # backbones.py's PANNsBackbone comment. What must hold for every backbone
-    # is "at least the actual learnable conv/attention/BN layers are now
-    # trainable" -- checked as "more than just the head-sized param count".
+    # Deliberately not asserting that ALL parameters are trainable: each
+    # wrapper keeps its fixed front-end frozen even in full mode (PANNs' fixed
+    # torchlibrosa STFT/mel matrices and its unused AudioSet head, YAMNet's
+    # unused AudioSet head, HuBERT's CNN feature encoder -- see backbones.py).
+    # The invariant is that the genuinely learnable layers are now trainable.
     n_total = sum(p.numel() for p in model.backbone.parameters())
     n_trainable = sum(p.numel() for p in model.backbone.parameters() if p.requires_grad)
-    assert n_trainable > 0, "BUG: freeze_backbone=False left zero backbone params trainable"
+    assert n_trainable > 0, "freeze_backbone=False left zero backbone params trainable"
     print(f"  [OK] {n_trainable}/{n_total} backbone params trainable")
 
     # --- Check 7: train() actually cascades into the backbone now ---
     model.train()
     assert model.backbone.training is True, (
-        "BUG: backbone.training is False after model.train() with freeze_backbone=False -- "
-        "the eval-lock is still engaged even though it shouldn't be"
+        "backbone.training is False after model.train() with freeze_backbone=False -- "
+        "the eval lock is still engaged when it should not be"
     )
     model.eval()
-    assert model.backbone.training is False, "BUG: backbone didn't respond to model.eval() either"
+    assert model.backbone.training is False, "backbone did not respond to model.eval() either"
     print("  [OK] backbone.training correctly tracks model.train()/model.eval() now")
 
     # --- Check 8: gradient reaches backbone params, not just the head ---
@@ -155,19 +174,16 @@ def run_unfrozen_checks(backbone_name):
         p.grad.abs().sum().item() for p in model.backbone.parameters() if p.grad is not None
     )
     n_with_grad = sum(1 for p in model.backbone.parameters() if p.grad is not None)
-    assert n_with_grad > 0, "BUG: no backbone parameter received a gradient at all"
-    assert backbone_grad_norm > 0, "BUG: backbone gradients are all exactly zero"
-    # Sanity bound, not just "nonzero": this is exactly what caught the real
-    # PANNs bug (blanket-unfreezing its fixed mel-filterbank matrix produced a
-    # ~5e11 gradient sum vs. O(10-1000) for every genuinely learnable param).
-    # 1e6 is well above any plausible real gradient sum for this tiny 2-sample
-    # synthetic batch, but many orders of magnitude below the astronomical
-    # values a "unfroze something that should have stayed a fixed transform"
-    # bug produces -- a real regression trips this, normal training doesn't.
+    assert n_with_grad > 0, "no backbone parameter received a gradient at all"
+    assert backbone_grad_norm > 0, "backbone gradients are all exactly zero"
+    # Upper bound as well as "non-zero". Unfreezing a fixed DSP transform such
+    # as PANNs' mel-filterbank matrix produces a gradient sum on the order of
+    # 1e11, against O(10-1000) for genuinely learnable layers, so 1e6 sits far
+    # above any plausible value for this two-sample synthetic batch while
+    # remaining far below what that class of mistake yields.
     assert backbone_grad_norm < 1e6, (
-        f"BUG: backbone gradient sum {backbone_grad_norm:.3e} is implausibly large -- "
-        f"likely unfroze a fixed/non-learnable transform by mistake (see the PANNs "
-        f"mel-filterbank bug this exact check caught on 2026-09-14)"
+        f"backbone gradient sum {backbone_grad_norm:.3e} is implausibly large -- "
+        f"a fixed, non-learnable transform was most likely left unfrozen"
     )
     head_grad_norm = sum(p.grad.abs().sum().item() for p in model.qa_classifier.parameters() if p.grad is not None)
     assert head_grad_norm > 0, "no gradient reached the trainable head either"
@@ -175,21 +191,18 @@ def run_unfrozen_checks(backbone_name):
           f"backbone params (grad norm={backbone_grad_norm:.4f}, sane magnitude), "
           f"head grad norm={head_grad_norm:.4f}")
 
-    # --- Check 9: unfrozen backbone still respects an AMBIENT no_grad context
-    # (i.e. it inherits the caller's context rather than force-overriding it
-    # with torch.enable_grad()) -- regression test for a real bug caught
-    # 2026-09-14 in YAMNetBackbone.forward(), which used torch.enable_grad()
-    # instead of nullcontext() and would have built a needless autograd graph
-    # during evaluate_fold()'s `with torch.no_grad():` eval loop every single
-    # epoch. Not a correctness bug (eval never calls .backward()), but wasted
-    # memory/compute, and inconsistent with PANNsBackbone/HubertBackbone. ---
+    # --- Check 9: an unfrozen backbone still inherits the caller's autograd
+    # context rather than forcing gradients on. evaluate_fold() runs inference
+    # inside `with torch.no_grad():`, so a forward() that wrapped itself in
+    # torch.enable_grad() would build an autograd graph that is never
+    # backpropagated, wasting memory and time on every evaluation pass. ---
     model.train()
     with torch.no_grad():
         out = model(batch)
     assert not out.requires_grad, (
-        "BUG: model output still requires_grad under an ambient torch.no_grad() context -- "
-        "some backbone forward() is force-overriding the caller's grad context instead of "
-        "inheriting it (this is the exact YAMNet torch.enable_grad() bug found 2026-09-14)"
+        "model output still requires_grad under an ambient torch.no_grad() context -- "
+        "a backbone forward() is overriding the caller's autograd context instead of "
+        "inheriting it"
     )
     print("  [OK] unfrozen backbone still respects an ambient torch.no_grad() context")
 

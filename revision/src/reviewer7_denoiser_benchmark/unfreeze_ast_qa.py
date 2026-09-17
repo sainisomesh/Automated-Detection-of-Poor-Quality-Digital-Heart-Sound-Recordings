@@ -1,29 +1,26 @@
 """
-AST-QA model variant for Reviewer #1 Comment 2 (frozen vs. full vs. top-K
-backbone unfreezing ablation).
+AST-QA model with a configurable backbone freeze policy: frozen, fully
+fine-tuned, or top-K layer unfreezing.
 
-Structurally identical to src/models/ast_qa.py's ASTHeartQA -- same AST
-backbone, same qa_classifier head (Linear(768,128) -> ReLU -> Dropout(0.1)
--> Linear(128,1)) -- but built as a SEPARATE file here rather than editing
-the shared src/models/ast_qa.py / reproducibility/src/models/ast_qa.py.
-Same convention PAPER_REVISIONS/reviewer7_backbone_swap/src/backbone_qa_model.py
-already established: shared code that produced the published Table 2 /
-Figure 3 numbers stays untouched, so a bug in a new revision experiment can
-never retroactively change a published result.
+The architecture is identical to the published model in
+`../models/ast_qa.py` (ASTHeartQA) -- same AST backbone, same QA head
+Linear(768, 128) -> ReLU -> Dropout(0.1) -> Linear(128, 1) -- and is kept as
+a separate class rather than added to that file, so that the code path which
+reproduces the originally published results is never modified by a revision
+experiment.
 
-Encoder structure (verified directly against the installed `transformers`
-version, not assumed from docs -- see audit notes in ../README.md):
-self.encoder is an ASTModel with
-    embeddings                     (patch + positional embeddings)
-    encoder.layer[0..11]            (12 ASTLayer transformer blocks)
-    layernorm                       (final LayerNorm, feeds the CLS token
-                                      that both classifiers consume)
+Encoder structure (as exposed by `transformers`' ASTModel):
+    embeddings              patch + positional embeddings
+    encoder.layer[0..11]    12 ASTLayer transformer blocks
+    layernorm               final LayerNorm, producing the [CLS] token
+                            representation that both classifiers consume
 
-"Top-K" unfreezing = the LAST K layers (encoder.layer[12-K:]) plus the
-final layernorm -- the layers closest to the classifier head. This is the
-conventional choice for progressive unfreezing: keep the early, general
-AudioSet features frozen the longest, adapt only the late, task-specific
-layers. CLAUDE.md Sec 9.1 Comment 2 specifies K in {2, 4}.
+"Top-K" unfreezing means the LAST K transformer blocks
+(`encoder.layer[12-K:]`) plus the final layernorm, i.e. the layers closest to
+the classifier head. This is the conventional progressive-unfreezing choice:
+the early, general AudioSet features stay frozen while only the late,
+task-specific layers adapt. K is restricted to {2, 4}, the two settings
+reported in the ablation.
 """
 
 import torch.nn as nn
@@ -34,6 +31,17 @@ VALID_TOPK = (2, 4)
 
 
 class ASTHeartQAUnfreeze(nn.Module):
+    """AST binary quality classifier with a selectable backbone freeze policy.
+
+    Args:
+        model_name: pretrained AST checkpoint to load.
+        unfreeze_mode: "frozen" (train the QA head only), "full" (fine-tune
+            the whole encoder) or "topk" (fine-tune the last `topk_layers`
+            transformer blocks plus the final layernorm).
+        topk_layers: number of trailing encoder layers to unfreeze; used only
+            when `unfreeze_mode="topk"`, and restricted to {2, 4}.
+    """
+
     def __init__(self, model_name="MIT/ast-finetuned-audioset-10-10-0.4593",
                  unfreeze_mode="frozen", topk_layers=0):
         super().__init__()
@@ -41,8 +49,8 @@ class ASTHeartQAUnfreeze(nn.Module):
             raise ValueError(f"unfreeze_mode must be one of {UNFREEZE_MODES}, got {unfreeze_mode!r}")
         if unfreeze_mode == "topk" and topk_layers not in VALID_TOPK:
             raise ValueError(
-                f"topk_layers must be one of {VALID_TOPK} per CLAUDE.md Sec 9.1 Comment 2, "
-                f"got {topk_layers!r}"
+                f"topk_layers must be one of {VALID_TOPK} (the settings reported in the "
+                f"unfreezing ablation), got {topk_layers!r}"
             )
 
         self.config = ASTConfig.from_pretrained(model_name)
@@ -63,10 +71,13 @@ class ASTHeartQAUnfreeze(nn.Module):
         self._apply_freeze_policy()
 
     def _apply_freeze_policy(self):
-        # Always reset to fully frozen first, then selectively re-enable --
-        # this is what makes set_unfreeze_mode() safe to call more than
-        # once (e.g. the topk warmup -> unfreeze transition) without ever
-        # leaving a stale requires_grad=True behind from a prior mode.
+        """Apply the current freeze policy to the encoder parameters.
+
+        The encoder is always reset to fully frozen first and then
+        selectively re-enabled, which makes set_unfreeze_mode() safe to call
+        repeatedly (e.g. a head-only warmup followed by top-K unfreezing)
+        without leaving a stale requires_grad=True from an earlier mode.
+        """
         for p in self.encoder.parameters():
             p.requires_grad = False
 
@@ -89,9 +100,12 @@ class ASTHeartQAUnfreeze(nn.Module):
             p.requires_grad = True
 
     def set_unfreeze_mode(self, unfreeze_mode, topk_layers=0):
-        """Switch freeze policy mid-training. Used for Mode C's progressive
-        schedule: head-only warmup (mode='frozen'), then unfreeze the top-K
-        layers (mode='topk') and keep training."""
+        """Switch the freeze policy mid-training.
+
+        Used for the progressive schedule: a head-only warmup with
+        `unfreeze_mode="frozen"`, then `unfreeze_mode="topk"` to unfreeze the
+        last K layers and continue training the same model instance.
+        """
         if unfreeze_mode not in UNFREEZE_MODES:
             raise ValueError(f"unfreeze_mode must be one of {UNFREEZE_MODES}, got {unfreeze_mode!r}")
         if unfreeze_mode == "topk" and topk_layers not in VALID_TOPK:
@@ -101,7 +115,11 @@ class ASTHeartQAUnfreeze(nn.Module):
         self._apply_freeze_policy()
 
     def trainable_backbone_parameters(self):
-        """Encoder params currently marked trainable (empty list in frozen mode)."""
+        """Encoder parameters currently trainable (empty in frozen mode).
+
+        Returned separately from the head so that the optimizer can give the
+        backbone its own, lower learning rate.
+        """
         return [p for p in self.encoder.parameters() if p.requires_grad]
 
     def num_trainable_parameters(self):
@@ -111,17 +129,20 @@ class ASTHeartQAUnfreeze(nn.Module):
         return sum(p.numel() for p in self.parameters())
 
     def forward(self, input_values):
+        """Return (original AudioSet logits, QA logit) for a batch of spectrograms."""
         outputs = self.encoder(input_values)
         cls_token_state = outputs.last_hidden_state[:, 0, :]
-        # Original AudioSet logits (527 classes) -- unused by the QA loss,
-        # kept only for structural parity with src/models/ast_qa.py's
-        # ASTHeartQA (same forward signature, same two return values).
+        # The original AudioSet head (527 classes) is not used by the QA loss;
+        # it is returned only so this class has the same forward signature and
+        # return arity as the published ASTHeartQA, letting the two be used
+        # interchangeably by the training/eval loops.
         original_logits = self.original_classifier(cls_token_state)
         qa_logits = self.qa_classifier(cls_token_state)
         return original_logits, qa_logits
 
 
 if __name__ == "__main__":
+    # Print the trainable/total parameter counts for each freeze policy.
     for mode, k in [("frozen", 0), ("full", 0), ("topk", 2), ("topk", 4)]:
         m = ASTHeartQAUnfreeze(unfreeze_mode=mode, topk_layers=k)
         tag = mode if mode != "topk" else f"topk{k}"

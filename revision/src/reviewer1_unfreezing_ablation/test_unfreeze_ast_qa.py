@@ -1,42 +1,42 @@
 #!/usr/bin/env python3
 """
-Sanity/regression checks for unfreeze_ast_qa.py and the optimizer/schedule
-logic in train_unfreezing_ablation_cv.py, run BEFORE trusting any training
-run. Mirrors the "verify before trusting" bar set by
-../../reviewer7_backbone_swap/src/test_backbones.py.
+Audit checks for unfreeze_ast_qa.py and the optimizer construction in
+train_unfreezing_ablation_cv.py.
+
+These run in seconds on CPU and are intended to be run before any training
+job: they verify that each freeze policy trains exactly the parameters it
+claims to, which is the kind of error that otherwise shows up only as
+inexplicably poor results.
 
 Run:
     python test_unfreeze_ast_qa.py
 
 Checks:
-  1. 'frozen' mode has EXACTLY the same trainable parameter count as the
-     published baseline ASTHeartQA(freeze_base=True) -- a structural
-     regression test against src/models/ast_qa.py, so Mode A here is
-     provably the same model shape as what produced Table 2 / Figure 3.
-  2. 'full' mode unfreezes all 12 encoder layers (every encoder param has
-     requires_grad=True).
-  3. 'topk' mode with K in {2,4} unfreezes EXACTLY the last K
-     transformer layers (encoder.layer[12-K:]) plus the final layernorm --
-     no more, no less. Checked by layer index, not just a raw count, so an
-     off-by-one (e.g. unfreezing layer 11..12-K instead of 12-K..11) would
-     be caught.
-  4. set_unfreeze_mode() correctly re-freezes: switching frozen -> topk2 ->
-     topk4 must never leave a stale requires_grad=True from a previous call
-     (this is the exact bug class _apply_freeze_policy's "always reset to
-     fully frozen first" comment defends against).
-  5. Gradient flow matches requires_grad exactly in each mode: frozen ->
-     zero backbone params get a gradient; full -> every backbone param
-     gets a non-None, non-zero-sum gradient; topk -> only the unfrozen
-     layers do.
-  6. build_optimizer() assigns the head to --head_lr and the unfrozen
-     backbone params to --backbone_lr as two distinct param groups (a
-     mix-up here would silently train the backbone at the head's LR,
-     contradicting CLAUDE.md Sec 9.1 Comment 2's "lower learning rate for
-     the backbone" instruction).
-  7. Forward pass is finite (no NaN/Inf) and shapes are correct in every mode.
-  8. The topk warmup -> unfreeze transition (as train_model's Phase 1 ->
-     Phase 2 does) ends with exactly the same trainable set as constructing
-     the model directly in 'topk' mode -- order of operations doesn't matter.
+  1. "frozen" mode has exactly the same trainable parameter count as the
+     paper's ASTHeartQA(freeze_base=True), so the ablation's reference
+     condition is structurally identical to the published model.
+  2. "full" mode leaves no encoder parameter frozen.
+  3. "topk" mode with K in {2,4} unfreezes exactly the LAST K transformer
+     blocks (encoder.layer[12-K:]) plus the final layernorm, and nothing
+     else. Verified by block index rather than by parameter count, so
+     unfreezing the first K blocks instead of the last K would be caught.
+  4. set_unfreeze_mode() re-freezes cleanly: no parameter left trainable by
+     a previous policy survives a switch (frozen -> topk4 -> topk2 -> frozen
+     -> full).
+  5. Gradient flow matches requires_grad exactly in every mode: trainable
+     parameters receive finite gradients, frozen ones receive none, and the
+     head always receives a non-zero gradient.
+  6. build_optimizer() places the head and the unfrozen backbone in two
+     disjoint parameter groups at head_lr and backbone_lr respectively. A
+     mix-up here would silently fine-tune the pretrained backbone at the
+     head's higher learning rate.
+  7. Forward pass output is finite and correctly shaped in every mode.
+  8. Running the progressive schedule (construct frozen, then
+     set_unfreeze_mode("topk", K)) yields the same trainable set as
+     constructing the model in "topk" mode directly.
+  9. Gradient checkpointing with use_reentrant=False preserves both the set
+     and the values of the backbone gradients; see that check for why the
+     keyword is mandatory.
 """
 
 import sys
@@ -48,21 +48,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from unfreeze_ast_qa import ASTHeartQAUnfreeze
 from train_unfreezing_ablation_cv import build_optimizer
 
+# Package root, so the paper's model can be imported for the check 1 comparison.
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
-from src.models.ast_qa import ASTHeartQA  # noqa: E402  (baseline, for the structural regression check)
+from src.models.ast_qa import ASTHeartQA  # noqa: E402
 
 MAX_LENGTH = 16000 * 10
 
 
 def make_batch(n=2, seed=0):
+    """Random batch shaped like ASTFeatureExtractor output: (n, 1024, 128)."""
     torch.manual_seed(seed)
-    return torch.randn(n, 1024, 128)  # AST log-mel input shape (max_length=1024, num_mel_bins=128)
+    return torch.randn(n, 1024, 128)
 
 
 def trainable_encoder_layer_indices(model):
-    """Which of encoder.layer[0..11] have >=1 trainable param, plus whether
-    the final layernorm is trainable. Used to check exact top-K selection."""
+    """Return (indices, layernorm_trainable) describing the trainable encoder.
+
+    `indices` lists which of encoder.layer[0..11] contain at least one
+    trainable parameter; the flag reports whether the final layernorm is
+    trainable. Together these pin down the exact top-K selection.
+    """
     idx = []
     for i, layer in enumerate(model.encoder.encoder.layer):
         if any(p.requires_grad for p in layer.parameters()):
@@ -72,18 +78,19 @@ def trainable_encoder_layer_indices(model):
 
 
 def check_1_matches_baseline():
+    """Frozen mode must be structurally identical to the paper's model."""
     print("[1] frozen mode matches published baseline ASTHeartQA(freeze_base=True) trainable count")
     baseline = ASTHeartQA(freeze_base=True)
     ablation = ASTHeartQAUnfreeze(unfreeze_mode="frozen")
     n_base = sum(p.numel() for p in baseline.parameters() if p.requires_grad)
     n_abl = sum(p.numel() for p in ablation.parameters() if p.requires_grad)
     assert n_base == n_abl, f"BUG: baseline trainable={n_base:,} != frozen-mode trainable={n_abl:,}"
-    # Neither model ever explicitly freezes original_classifier (the unused 527-way
-    # AudioSet head) -- it has requires_grad=True by default in both, and no
-    # gradient reaches it since it's disconnected from the QA loss. This is a
-    # pre-existing quirk of the published baseline (src/models/ast_qa.py), not
-    # something introduced here; preserved for exact structural fidelity rather
-    # than "fixed", since Mode A must be provably the same model as Table 2/Fig 3.
+    # Neither model explicitly freezes original_classifier, the pretrained
+    # 527-way AudioSet head, so it counts as trainable in both. It is harmless:
+    # it is disconnected from the QA loss, receives no gradient, and is not
+    # included in the optimizer's parameter groups. The behaviour is inherited
+    # unchanged from src/models/ast_qa.py and is kept so that the frozen mode
+    # remains parameter-for-parameter identical to the published model.
     n_head = sum(p.numel() for p in ablation.qa_classifier.parameters())
     n_original_classifier = sum(p.numel() for p in ablation.original_classifier.parameters())
     assert n_abl == n_head + n_original_classifier, (
@@ -97,6 +104,7 @@ def check_1_matches_baseline():
 
 
 def check_2_full_unfreezes_everything():
+    """End-to-end mode must leave nothing frozen."""
     print("[2] full mode unfreezes every encoder parameter")
     model = ASTHeartQAUnfreeze(unfreeze_mode="full")
     n_frozen = sum(1 for p in model.encoder.parameters() if not p.requires_grad)
@@ -106,6 +114,9 @@ def check_2_full_unfreezes_everything():
 
 
 def check_3_topk_selects_exact_layers():
+    """Top-K must mean the LAST K blocks, i.e. indices 12-K..11, plus the
+    final layernorm. Comparing index lists (not counts) catches a selection
+    that unfroze the first K blocks instead."""
     print("[3] topk mode unfreezes exactly the last K layers + final layernorm")
     for k in (2, 4):
         model = ASTHeartQAUnfreeze(unfreeze_mode="topk", topk_layers=k)
@@ -113,7 +124,7 @@ def check_3_topk_selects_exact_layers():
         expected = list(range(12 - k, 12))
         assert idx == expected, f"BUG: topk={k} unfroze layers {idx}, expected {expected}"
         assert ln, f"BUG: topk={k} did not unfreeze the final layernorm"
-        # Layers below the top-K must stay frozen.
+        # Everything below the top-K must stay frozen.
         for i in range(0, 12 - k):
             layer_trainable = any(p.requires_grad for p in model.encoder.encoder.layer[i].parameters())
             assert not layer_trainable, f"BUG: topk={k} leaked trainable params into layer {i}"
@@ -123,6 +134,7 @@ def check_3_topk_selects_exact_layers():
 
 
 def check_4_set_unfreeze_mode_resets_cleanly():
+    """Switching policies must not carry trainable layers over from the previous one."""
     print("[4] set_unfreeze_mode() never leaks a stale unfrozen layer across transitions")
     model = ASTHeartQAUnfreeze(unfreeze_mode="frozen")
     idx, ln = trainable_encoder_layer_indices(model)
@@ -135,9 +147,9 @@ def check_4_set_unfreeze_mode_resets_cleanly():
     model.set_unfreeze_mode("topk", topk_layers=2)
     idx2, ln2 = trainable_encoder_layer_indices(model)
     assert idx2 == [10, 11] and ln2, (
-        f"BUG: after topk4->topk2, got layers={idx2} -- layers 8,9 from the PREVIOUS mode "
-        f"were not re-frozen (this is exactly the stale-state bug _apply_freeze_policy's "
-        f"reset-to-fully-frozen-first step exists to prevent)"
+        f"BUG: after topk4->topk2, got layers={idx2} -- layers 8,9 from the previous policy "
+        f"were not re-frozen, which is what _apply_freeze_policy's reset-to-frozen step "
+        f"is there to prevent"
     )
 
     model.set_unfreeze_mode("frozen")
@@ -152,6 +164,7 @@ def check_4_set_unfreeze_mode_resets_cleanly():
 
 
 def check_5_gradient_flow_matches_requires_grad():
+    """requires_grad is only a declaration; this confirms the backward pass agrees."""
     print("[5] gradients only reach params with requires_grad=True, in every mode")
     batch = make_batch(n=2)
     labels = torch.tensor([[1.0], [0.0]])
@@ -178,11 +191,12 @@ def check_5_gradient_flow_matches_requires_grad():
 
 
 def check_6_optimizer_param_groups():
+    """The head and the backbone must land in separate groups at their own LRs."""
     print("[6] build_optimizer assigns head_lr / backbone_lr to the correct, disjoint param groups")
     head_lr, backbone_lr = 1e-4, 5e-5
     assert head_lr != backbone_lr, "test constants must differ to actually exercise this check"
 
-    # frozen: single group, head only.
+    # Frozen: a single group containing the head only.
     model = ASTHeartQAUnfreeze(unfreeze_mode="frozen")
     opt = build_optimizer(model, "frozen", head_lr, backbone_lr)
     assert len(opt.param_groups) == 1
@@ -192,7 +206,8 @@ def check_6_optimizer_param_groups():
     assert n_params_in_group == n_head_params
     print(f"    [OK] frozen: 1 param group, lr={head_lr}, {n_params_in_group:,} params (head only)")
 
-    # full / topk: two groups, head at head_lr, backbone at backbone_lr, no overlap.
+    # Full / topk: two non-overlapping groups, head at head_lr and the
+    # trainable backbone at the lower backbone_lr.
     for mode, k in [("full", 0), ("topk", 4)]:
         model = ASTHeartQAUnfreeze(unfreeze_mode=mode, topk_layers=k)
         opt = build_optimizer(model, mode, head_lr, backbone_lr)
@@ -233,6 +248,9 @@ def check_7_forward_pass_finite_every_mode():
 
 
 def check_8_warmup_then_unfreeze_matches_direct_construction():
+    """The progressive schedule must converge on the same trainable set as
+    direct top-K construction, so the warmup phase has no lasting side effect
+    on which parameters train."""
     print("[8] warmup(frozen) -> set_unfreeze_mode(topk) ends up identical to direct topk construction")
     for k in (2, 4):
         warmed = ASTHeartQAUnfreeze(unfreeze_mode="frozen")
@@ -250,23 +268,34 @@ def check_8_warmup_then_unfreeze_matches_direct_construction():
         del warmed, direct
 
 
-CHECKPOINTING_KWARGS = {"use_reentrant": False}  # must match train_unfreezing_ablation_cv.py exactly
+CHECKPOINTING_KWARGS = {"use_reentrant": False}  # must match the training scripts exactly
 
 
 def check_9_gradient_checkpointing_still_trains_the_right_params():
+    """Gradient checkpointing must not change which parameters get gradients.
+
+    Requirement being verified: gradient checkpointing on a partially frozen
+    encoder must be enabled with use_reentrant=False. With a top-K policy,
+    blocks 0..(12-K-1) and the patch embeddings are frozen, so the activation
+    entering the first unfrozen block has requires_grad=False. In that
+    situation the default reentrant torch.utils.checkpoint implementation
+    returns no gradients for the checkpointed block's own trainable
+    parameters (it also emits "None of the inputs have requires_grad=True.
+    Gradients will be None"), so that block would never be updated while the
+    loss curve still looked normal.
+
+    Sub-checks: 9a demonstrates the reentrant behaviour so that reverting the
+    keyword cannot pass silently; 9b verifies the non-reentrant path gives
+    every trainable parameter a real gradient; 9c verifies checkpointing
+    changes only how the backward pass is computed, not its values.
+    """
     print("[9] gradient_checkpointing_enable() doesn't silently drop backbone gradients")
-    # Triggered by a real observation while smoke-testing: enabling grad_checkpointing on
-    # a 'topk' model prints "UserWarning: None of the inputs have requires_grad=True.
-    # Gradients will be None" from torch.utils.checkpoint -- because layers 0..(12-K-1)
-    # are frozen INCLUDING embeddings, so the activation flowing INTO the first unfrozen
-    # layer genuinely has requires_grad=False.
     labels = torch.tensor([[1.0], [0.0]])
 
-    # --- 9a: confirm the DEFAULT (reentrant) checkpoint really does drop that first
-    # unfrozen layer's gradients for 'topk' -- this is a real bug, not just a benign
-    # warning, and this sub-check exists to make sure it stays caught if anyone ever
-    # reverts the use_reentrant=False fix. 'full' is unaffected (every input already
-    # requires grad from the embeddings onward), so it's the negative control here. ---
+    # --- 9a: with the default (reentrant) implementation, the first unfrozen
+    # block of a top-K model loses its parameter gradients. "full" mode is
+    # unaffected, since the trainable embeddings make every activation require
+    # grad, so it serves as the negative control in 9b/9c below. ---
     model = ASTHeartQAUnfreeze(unfreeze_mode="topk", topk_layers=4)
     model.encoder.gradient_checkpointing_enable()  # default reentrant=True
     model.train()
@@ -275,17 +304,18 @@ def check_9_gradient_checkpointing_still_trains_the_right_params():
     first_unfrozen_layer = model.encoder.encoder.layer[12 - 4]  # layer 8
     missing = [n for n, p in first_unfrozen_layer.named_parameters() if p.requires_grad and p.grad is None]
     assert missing, (
-        "Expected the known reentrant-checkpointing bug to reproduce (missing gradients on "
-        f"layer 8), but got none missing -- either the bug was silently fixed upstream (update "
-        f"this test) or this check is no longer exercising the right code path"
+        "Expected reentrant checkpointing to drop gradients on layer 8, but all of them "
+        "were present -- either the upstream behaviour changed (in which case update this "
+        "check) or this check is no longer exercising the intended code path"
     )
     print(f"    [confirmed] default (reentrant) checkpointing DOES drop gradients on "
-          f"{missing} -- this is why train_unfreezing_ablation_cv.py must pass "
+          f"{missing} -- this is why the training scripts must pass "
           f"gradient_checkpointing_kwargs={CHECKPOINTING_KWARGS}")
     del model
 
-    # --- 9b: the actual fix (use_reentrant=False, exactly as train_unfreezing_ablation_cv.py
-    # calls it) must NOT have this problem, for both 'full' and 'topk'. ---
+    # --- 9b: with use_reentrant=False, exactly as the training scripts call
+    # it, every trainable encoder parameter must receive a real gradient and
+    # every frozen one none, in both "full" and "topk" modes. ---
     for mode, k in [("full", 0), ("topk", 4)]:
         batch = make_batch(n=2, seed=7)
         model = ASTHeartQAUnfreeze(unfreeze_mode=mode, topk_layers=k)
@@ -300,7 +330,7 @@ def check_9_gradient_checkpointing_still_trains_the_right_params():
             if p.requires_grad:
                 assert p.grad is not None, (
                     f"BUG ({mode},k={k},checkpointing,use_reentrant=False): unfrozen param "
-                    f"{name} got NO gradient -- the fix did not actually fix this"
+                    f"{name} received no gradient"
                 )
                 assert torch.isfinite(p.grad).all(), f"BUG ({mode},k={k}): NaN/Inf grad in {name}"
                 assert p.grad.abs().sum().item() > 0, (
@@ -316,19 +346,19 @@ def check_9_gradient_checkpointing_still_trains_the_right_params():
               f"encoder param tensors all got real, finite, nonzero gradients; frozen ones got none")
         del model
 
-    # --- 9c: numeric cross-check -- same model/input/seed, gradients on the unfrozen
-    # backbone params should match closely with fixed-checkpointing on vs. off entirely
-    # (checkpointing changes HOW the backward is computed, not the math). Both models
-    # stay in train() mode -- transformers' GradientCheckpointingLayer only actually
-    # engages checkpointing when `self.training` is True (confirmed by reading
-    # modeling_layers.GradientCheckpointingLayer.__call__ directly), so comparing in
-    # eval() would make model_ckpt silently stop checkpointing and this check would
-    # pass without testing anything. Train mode means the encoder's internal dropout is
-    # active in both models -- to keep that from being a confound (two independent
-    # forward calls would otherwise draw different random dropout masks and legitimately
-    # produce different logits for reasons unrelated to checkpointing), the global RNG
-    # is reset to the same seed immediately before EACH model's forward call, so both
-    # draw identical dropout masks during their (separate) initial forward passes. ---
+    # --- 9c: numeric cross-check. Checkpointing changes how the backward pass
+    # is computed, not the mathematics, so two identically initialized models
+    # fed the same batch must produce matching logits and matching gradients
+    # with checkpointing on and off.
+    #
+    # Two details make this comparison valid rather than vacuous:
+    #   * Both models stay in train() mode. transformers' checkpointing layer
+    #     only engages when self.training is True, so comparing in eval() would
+    #     silently disable checkpointing in the "checkpointed" model.
+    #   * Train mode leaves the encoder's dropout active, so the global RNG is
+    #     reset to the same seed immediately before each forward call; otherwise
+    #     the two models would draw different dropout masks and differ for
+    #     reasons unrelated to checkpointing. ---
     for mode, k in [("full", 0), ("topk", 4)]:
         torch.manual_seed(11)
         model_ckpt = ASTHeartQAUnfreeze(unfreeze_mode=mode, topk_layers=k)
@@ -359,7 +389,7 @@ def check_9_gradient_checkpointing_still_trains_the_right_params():
                 max_grad_diff = max(max_grad_diff, diff)
         assert max_grad_diff < 1e-4, (
             f"BUG ({mode},k={k}): checkpointed vs. plain backbone gradients differ by "
-            f"{max_grad_diff} -- checkpointing changed the actual gradient values, not just memory use"
+            f"{max_grad_diff} -- checkpointing altered the gradient values, not just memory use"
         )
         tag = mode if mode != "topk" else f"topk{k}"
         print(f"    [OK] {tag}: checkpointed(use_reentrant=False) vs. plain gradients match "

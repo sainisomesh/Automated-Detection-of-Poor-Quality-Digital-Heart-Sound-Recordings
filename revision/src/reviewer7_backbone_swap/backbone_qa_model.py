@@ -1,19 +1,24 @@
 """
-Generic backbone + binary QA head, for Reviewer #7 Comment 2.
+Generic audio backbone plus the paper's binary quality-assurance head
+(Reviewer #7, Comment 2).
 
-Structurally identical to src/models/ast_qa.py's ASTHeartQA -- same head
-architecture (Linear(hidden_dim, 128) -> ReLU -> Dropout(0.1) -> Linear(128,
-1)) -- just with the backbone swapped for PANNs/YAMNet/HuBERT instead of AST.
+The head is architecturally identical to ASTHeartQA's in ../models/ast_qa.py
+-- Linear(embedding_dim, 128) -> ReLU -> Dropout(0.1) -> Linear(128, 1) -- so
+that the only difference between this model and the published AST-QA model is
+which encoder produces the embedding. Holding the head fixed is what makes the
+backbone the sole independent variable in the comparison.
 
-Two modes, mirroring ../../reviewer1_unfreezing_ablation's frozen/full split:
-  - freeze_backbone=True (default): "Freeze each backbone encoder; attach an
-    identical classification head," per CLAUDE.md Sec 9.2 Comment 2's
-    original ask -- isolates architecture (attention vs. conv/MobileNet
-    inductive bias) from fine-tuning capacity.
-  - freeze_backbone=False (added 2026-09-14): unfreezes the whole backbone
-    too, per your follow-up question of whether AST's win in the frozen
-    comparison is partly just a frozen-feature-transfer artifact rather than
-    an architectural one -- see ../README.md "Full-unfreeze extension".
+Two modes, matching the frozen/full split used by the unfreezing ablation in
+../reviewer1_unfreezing_ablation/:
+  - freeze_backbone=True (default): the backbone is a fixed feature extractor
+    and only the head is trained, isolating the effect of the pretrained
+    representation and architectural inductive bias (self-attention versus
+    convolutional) from fine-tuning capacity.
+  - freeze_backbone=False: the backbone is fine-tuned end to end alongside the
+    head, which tests whether any AST advantage observed in the frozen setting
+    is specific to frozen-feature transfer rather than to the architecture.
+    Each wrapper still keeps its fixed, non-learnable front-end frozen; see
+    backbones.py.
 """
 
 import torch.nn as nn
@@ -22,6 +27,19 @@ from backbones import build_backbone
 
 
 class BackboneQAHead(nn.Module):
+    """Binary usable-vs-noise classifier: backbone embedding -> QA head logit.
+
+    Args:
+        backbone_name: one of the keys in backbones.BACKBONES
+            ("panns", "yamnet", "hubert").
+        freeze_backbone: if True the backbone is eval-locked and run under
+            no_grad, so only qa_classifier is trained.
+
+    forward() takes a (B, 160000) float32 16 kHz waveform batch and returns
+    raw (B, 1) logits, for use with BCEWithLogitsLoss; apply a sigmoid to
+    obtain the probability that a recording is of usable quality.
+    """
+
     def __init__(self, backbone_name: str, freeze_backbone: bool = True):
         super().__init__()
         self.backbone_name = backbone_name

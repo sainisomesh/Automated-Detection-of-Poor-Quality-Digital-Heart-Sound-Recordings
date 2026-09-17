@@ -1,9 +1,14 @@
 """
-Regenerates Fig3_*.pdf (the 6-panel metrics-vs-noise figure + legend) using the
-new full-unfreeze, 5-fold data, replacing the original frozen-backbone figures
-from the pre-revision manuscript. Styling (colors, markers, layout, fonts) is
-copied verbatim from ../../plot_separate_metrics.py so the figure looks
-identical in style to the original -- only the underlying data source changes.
+Regenerates the manuscript's six-panel metrics-versus-noise figure (Fig3_*.pdf)
+plus its shared legend, from the fully fine-tuned, 5-fold results.
+
+Each panel plots one evaluation metric against the noise-intensity coefficient
+lambda, with one curve per training strategy (clean-only, variable-noise
+U[0,10], fixed-noise lambda=10) alongside the per-lambda matched benchmark.
+Error bars are the 95% confidence intervals recorded alongside each mean.
+
+Writes the PDFs next to this script; copy them into the manuscript source
+directory to update the figure.
 """
 import json
 from pathlib import Path
@@ -16,8 +21,9 @@ import matplotlib as mpl
 mpl.rcParams['font.family'] = 'serif'
 mpl.rcParams['axes.formatter.use_mathtext'] = True
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-ABL_RESULTS = REPO_ROOT / "PAPER_REVISIONS" / "reviewer1_unfreezing_ablation" / "results"
+# Results live at revision/results/ ; this file is at revision/src/figures/.
+REVISION_ROOT = Path(__file__).resolve().parents[2]
+ABL_RESULTS = REVISION_ROOT / "results" / "reviewer1_unfreezing_ablation"
 LAMBDAS = [0.0, 0.25, 0.5, 1.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0]
 METRICS = ['AUROC', 'AUPRC', 'F1-score', 'Accuracy', 'Sensitivity', 'Specificity']
 JSON_KEYS = ['auroc', 'auprc', 'f1', 'accuracy', 'sensitivity', 'specificity']

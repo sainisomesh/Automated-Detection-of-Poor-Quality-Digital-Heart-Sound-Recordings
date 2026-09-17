@@ -1,15 +1,9 @@
-# Consolidated dependencies for the major-revision reproducibility package
-# (reviewer1_baselines, reviewer1_unfreezing_ablation, reviewer7_backbone_swap,
-# reviewer7_denoiser_benchmark). Unlike each experiment's own
-# PAPER_REVISIONS/*/requirements.txt (which omit torch/torchaudio because
-# those come from the shared Vertex AI Docker base image), this file lists
-# them explicitly since there's no such base image for local reproduction.
+# Dependencies for all four revision experiments (baselines, backbone
+# adaptation ablation, backbone swap, denoise-then-classify).
 #
-# Versions mirror what was actually verified in PAPER_REVISIONS at the time
-# each experiment's results here were produced -- see each subfolder's
-# README.md in PAPER_REVISIONS/ for the full verification history (e.g. the
-# transformers==4.57.3 pin exists because an earlier unpinned build silently
-# resolved to 5.17.0 and changed HubertModel's behavior).
+# Versions are pinned to those the checked-in results were produced with.
+# transformers is pinned exactly because HubertModel's behaviour changes
+# across major versions, which would alter the backbone-swap comparison.
 
 torch>=2.5.0
 torchaudio>=2.5.0
@@ -26,6 +20,9 @@ scipy
 soundfile
 tqdm
 requests
+matplotlib>=3.7.0   # src/figures/regenerate_fig3_unfrozen.py
+# google-cloud-storage   # optional: only for the --gcs_bucket cloud-execution path,
+#                        # imported lazily so local runs do not need it
 PyWavelets
 scikit-image
 panns_inference==0.1.1

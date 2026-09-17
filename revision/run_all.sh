@@ -1,33 +1,33 @@
 #!/bin/bash
 # ============================================================================
-# RUN ALL — Revision Reproducibility Suite
+# RUN ALL — Revision Experiments
 # ============================================================================
 #
-# Reproduces the NEW experiments built for the revision response to Reviewer
-# #1 and Reviewer #7, INCLUDING the 2026-09-15 PI-directed pivot to a fully
-# fine-tuned (not frozen) AST backbone as the primary/deployed model, whose
-# numbers are what main.tex actually reports as of 2026-09-17. Sibling to
-# ../run_all.sh, which reproduces the original published Table 2 / Figure 3
-# (frozen backbone, 10-fold) and is untouched by this script.
+# Reproduces the four additional experiments reported in the revised
+# manuscript:
+#
+#   Step 2  Comparison against two published PCG quality-assessment methods
+#           (Tang et al. 2021, Giordano et al. 2021), 5-fold, CPU only.
+#   Step 3  Backbone adaptation ablation: frozen, fully fine-tuned, and
+#           top-K-layer unfreezing, at 3-fold (3a) and 5-fold (3b), plus the
+#           per-lambda matched benchmark for the fully fine-tuned model.
+#   Step 4  Backbone swap: PANNs CNN14, YAMNet and HuBERT substituted for the
+#           AST encoder, each frozen and fully fine-tuned, 3-fold.
+#   Step 5  Denoise-then-classify comparison: a clean-only classifier
+#           evaluated on corrupted audio with and without each denoiser, run
+#           for both the fully fine-tuned model (5-fold) and the frozen model
+#           (10-fold).
+#
+# Every step is optional and prompts before running; results for all of them
+# are already checked in under results/, so a fresh run is a verification
+# rather than a prerequisite. Each step prints the fold count it uses.
+#
+# ../run_all.sh is the separate entry point for the original per-lambda and
+# three-strategies experiments, and is unaffected by this script.
 #
 # Usage:
 #   chmod +x run_all.sh
 #   ./run_all.sh
-#
-# IMPORTANT — fold counts and model variants differ BETWEEN steps in this
-# script, on purpose. See README.md "What's final vs. historical" before
-# reporting any number next to a different step's results:
-#   - reviewer1_baselines:                5-fold, vs. BOTH the frozen (historical)
-#                                          and fully fine-tuned (final, in main.tex) AST-QA
-#   - reviewer1_unfreezing_ablation:      3-fold (frozen/full/topk2/topk4, historical
-#                                          ablation) AND 5-fold (frozen/full/topk2/topk4/
-#                                          full-clean/full-fixed10 + per-lambda-full,
-#                                          the numbers actually in main.tex)
-#   - reviewer7_backbone_swap:            3-fold, frozen AND fully fine-tuned, all final
-#   - reviewer7_denoiser_benchmark:       10-fold frozen-model comparison (historical,
-#                                          validates against the published clean-only
-#                                          numbers) AND 5-fold fully-fine-tuned-model
-#                                          comparison (final, in main.tex)
 #
 # ============================================================================
 
@@ -36,8 +36,8 @@ set -e  # Exit on error
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Reuses ../dataset and ../mixed_dataset -- the same source data as ../run_all.sh's
-# package, not a separate copy. If you've already run ../run_all.sh, this is a no-op.
+# Reuses ../dataset and ../mixed_dataset, the same source data the sibling
+# package uses, rather than keeping a second copy.
 DATA_DIR="$SCRIPT_DIR/../dataset"
 MIXED_DIR="$SCRIPT_DIR/../mixed_dataset"
 
@@ -46,10 +46,9 @@ echo "  Revision — Reproducibility Suite"
 echo "============================================"
 echo ""
 
-# ── Step 0: Dataset (auto-downloads from Zenodo if missing) ────────
-# Only the raw source dataset (~3 GB). The pre-mixed lambda sweep needed by the
-# denoiser benchmark steps below is generated locally from this, not downloaded --
-# see Step 5 below.
+# ── Step 0: Dataset (downloads from Zenodo if not already present) ─
+# Fetches only the raw source dataset (~3 GB). The pre-mixed lambda sweep that
+# Step 5 needs is generated locally from it rather than downloaded separately.
 bash "$SCRIPT_DIR/../download_data.sh" "$DATA_DIR"
 echo ""
 
@@ -58,10 +57,10 @@ echo "── Step 1: Installing dependencies ──"
 pip install -r requirements.txt
 echo ""
 
-# ── Step 2: Reviewer #1 baselines (Tang, Giordano) — 5-fold, CPU ──
-echo "── Step 2: Reviewer #1 baselines (Tang et al., Giordano et al.) ──"
-echo "5-fold, CPU only. Already complete in results/reviewer1_baselines/ --"
-echo "rerunning will overwrite it with a fresh (should be identical) copy."
+# ── Step 2: Published baselines (Tang, Giordano) — 5-fold, CPU ────
+echo "── Step 2: Published baselines (Tang et al., Giordano et al.) ──"
+echo "5-fold patient-level CV, CPU only. Results are already in results/reviewer1_baselines/;"
+echo "rerunning regenerates them in place."
 read -p "Rerun baselines? [y/N]: " run_baselines
 if [[ "$run_baselines" =~ ^[Yy]$ ]]; then
     cd src/reviewer1_baselines
@@ -71,12 +70,11 @@ if [[ "$run_baselines" =~ ^[Yy]$ ]]; then
     python train_giordano_baseline_cv.py \
         --data_dir "$DATA_DIR/" --output_dir ../../results/reviewer1_baselines/giordano_full/ \
         --n_folds 5 --seed 42
-    echo "Significance vs. AST-QA: two variants are checked in --"
-    echo "  significance_vs_ast_qa.json            (unpaired, vs. the published frozen 10-fold model)"
-    echo "  significance_vs_ast_qa_unfrozen_paired.json (paired, vs. the fully fine-tuned 5-fold"
-    echo "                                          model -- this is what main.tex cites)"
-    echo "Regenerating these requires the AST-QA prediction CSVs referenced in each script's"
-    echo "own --help; see compute_significance.py / compute_significance_paired.py."
+    echo "Significance testing against AST-QA is computed by two separate scripts:"
+    echo "  compute_significance.py        unpaired comparison vs. the frozen-backbone model"
+    echo "  compute_significance_paired.py paired comparison vs. the fully fine-tuned model"
+    python compute_significance.py
+    python compute_significance_paired.py
     cd "$SCRIPT_DIR"
     echo "✓ Baselines complete"
 else
@@ -84,12 +82,10 @@ else
 fi
 echo ""
 
-# ── Step 3: Reviewer #1 unfreezing ablation — 3-fold (historical) ────
-echo "── Step 3a: Reviewer #1 unfreezing ablation, 3-fold (historical ablation) ──"
-echo "Already complete in results/reviewer1_unfreezing_ablation/{frozen,full,topk2,topk4}_3fold/."
-echo "NOTE: these 3-fold numbers are still a live input elsewhere -- reviewer7_backbone_swap's"
-echo "AST comparator column reads directly from these folders (see its own README). Do not"
-echo "delete or renumber them even though Step 3b below supersedes them for the ablation table."
+# ── Step 3: Backbone adaptation ablation ──────────────────────────
+echo "── Step 3a: Backbone adaptation ablation, 3-fold ──"
+echo "Results in results/reviewer1_unfreezing_ablation/{frozen,full,topk2,topk4}_3fold/."
+echo "These provide the AST reference values for the 3-fold backbone-swap comparison in Step 4."
 read -p "Rerun 3-fold unfreezing ablation (all 4 conditions)? [y/N]: " run_unfreeze3
 if [[ "$run_unfreeze3" =~ ^[Yy]$ ]]; then
     cd src/reviewer1_unfreezing_ablation
@@ -110,10 +106,10 @@ else
 fi
 echo ""
 
-echo "── Step 3b: Reviewer #1 unfreezing ablation, 5-fold (FINAL — cited in main.tex) ──"
-echo "Already complete in results/reviewer1_unfreezing_ablation/{frozen,full,topk2,topk4}_5fold/"
-echo "and full_5fold_{clean,fixed10,variable}/. This is the actual ablation table and Figure 3"
-echo "'variable-noise (full)' curve in the current manuscript."
+echo "── Step 3b: Backbone adaptation ablation, 5-fold, plus per-lambda benchmark ──"
+echo "Results in results/reviewer1_unfreezing_ablation/{frozen,full,topk2,topk4}_5fold/,"
+echo "full_5fold_{clean,fixed10,variable}/ and per_lambda_unfrozen/. These are the ablation"
+echo "table, the per-lambda table and the metrics-vs-noise figure in the manuscript."
 read -p "Rerun 5-fold unfreezing ablation (7 conditions)? [y/N]: " run_unfreeze5
 if [[ "$run_unfreeze5" =~ ^[Yy]$ ]]; then
     cd src/reviewer1_unfreezing_ablation
@@ -137,7 +133,7 @@ if [[ "$run_unfreeze5" =~ ^[Yy]$ ]]; then
         --noise_strategy fixed_10 \
         --data_dir "$DATA_DIR/" --output_dir ../../results/reviewer1_unfreezing_ablation/full_5fold_fixed10/ \
         --n_folds 5 --epochs 5 --seed 42
-    echo "-- per-lambda unfrozen benchmark (Table 2 analog, fully fine-tuned model) --"
+    echo "-- per-lambda matched benchmark, fully fine-tuned model, one lambda per run --"
     for lam in 0.0 0.25 0.5 1.0 5.0 10.0 25.0 50.0 75.0 100.0; do
         python train_per_lambda_unfrozen_cv.py --unfreeze_mode full --backbone_lr 5e-5 --grad_checkpointing \
             --lambda_val "$lam" \
@@ -151,10 +147,10 @@ else
 fi
 echo ""
 
-# ── Step 4: Reviewer #7 backbone swap — 3-fold, frozen + full, GPU ──
-echo "── Step 4: Reviewer #7 backbone swap (PANNs/YAMNet/HuBERT, frozen + full) ──"
-echo "3-fold (settled exception, see README.md). Both frozen and full-unfreeze are"
-echo "already complete in results/reviewer7_backbone_swap/{panns,yamnet,hubert}[_full]/."
+# ── Step 4: Backbone swap — 3-fold, frozen and fine-tuned, GPU ────
+echo "── Step 4: Backbone swap (PANNs / YAMNet / HuBERT, frozen and fully fine-tuned) ──"
+echo "3-fold patient-level CV. Results in"
+echo "results/reviewer7_backbone_swap/{panns,yamnet,hubert}[_full]/."
 read -p "Rerun backbone swap (all 3 backbones x both modes)? [y/N]: " run_backbone
 if [[ "$run_backbone" =~ ^[Yy]$ ]]; then
     cd src/reviewer7_backbone_swap
@@ -173,11 +169,10 @@ else
 fi
 echo ""
 
-# ── Step 5: Reviewer #7 denoiser benchmark ─────────────────────────
-echo "── Step 5a: Reviewer #7 denoiser benchmark, 10-fold frozen model (historical) ──"
-echo "Validates the pipeline against the published clean-only Table 2/Figure 3 numbers."
-echo "Already complete in results/reviewer7_denoiser_benchmark/{clean_only,denoiser_comparison}_10fold/."
-echo "Needs the pre-mixed lambda sweep, generated locally into $MIXED_DIR on first use."
+# ── Step 5: Denoise-then-classify comparison ──────────────────────
+echo "── Step 5a: Denoise-then-classify, frozen model, 10-fold ──"
+echo "Results in results/reviewer7_denoiser_benchmark/{clean_only,denoiser_comparison}_10fold/."
+echo "Requires the pre-mixed lambda sweep, generated locally into $MIXED_DIR on first use."
 read -p "Rerun 10-fold denoiser benchmark (Step 1 + Step 2)? [y/N]: " run_denoiser10
 if [[ "$run_denoiser10" =~ ^[Yy]$ ]]; then
     if [ ! -d "$MIXED_DIR/lambda_0.0" ]; then
@@ -203,8 +198,8 @@ else
 fi
 echo ""
 
-echo "── Step 5b: Reviewer #7 denoiser benchmark, 5-fold fully fine-tuned model (FINAL — cited in main.tex) ──"
-echo "Already complete in results/reviewer7_denoiser_benchmark/{clean_only,denoiser_comparison}_full_5fold/."
+echo "── Step 5b: Denoise-then-classify, fully fine-tuned model, 5-fold ──"
+echo "Results in results/reviewer7_denoiser_benchmark/{clean_only,denoiser_comparison}_full_5fold/."
 read -p "Rerun 5-fold fully-fine-tuned denoiser benchmark (Step 1 + Step 2)? [y/N]: " run_denoiser5
 if [[ "$run_denoiser5" =~ ^[Yy]$ ]]; then
     if [ ! -d "$MIXED_DIR/lambda_0.0" ]; then
@@ -235,6 +230,6 @@ echo "============================================"
 echo "  RUN COMPLETE (see above for what actually ran vs. was skipped)"
 echo "============================================"
 echo ""
-echo "Results, where generated, are under results/<experiment>/. Compare against"
-echo "the checked-in reference results the same way -- see README.md's"
-echo "'Verifying a fresh run' section."
+echo "Results, where generated, are under results/<experiment>/. See README.md's"
+echo "'Verifying a fresh run' section for how to compare them against the"
+echo "checked-in reference values."

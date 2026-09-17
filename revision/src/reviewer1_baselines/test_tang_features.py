@@ -1,9 +1,14 @@
 """
-Sanity checks for tang_features.py, run BEFORE wiring into the real CV
-pipeline. These aren't a full test suite -- they're targeted checks that each
-ported function behaves the way the published algorithm should on signals
-whose expected behavior we know analytically, to catch porting bugs early
-(wrong axis, wrong normalization, off-by-one in lag windows, etc).
+Behavioural sanity checks for tang_features.py.
+
+Not an exhaustive unit-test suite: each check feeds a synthetic signal whose
+expected feature behaviour is known analytically (Gaussian noise, pure tones,
+a periodic waveform, a synthetic PCG) and asserts that the corresponding
+ported function responds in the documented direction. This catches the common
+classes of porting error -- wrong reduction axis, missing normalization,
+off-by-one lag windows -- without requiring the original MATLAB runtime.
+
+Exits non-zero if any check fails.
 
 Run: python3 test_tang_features.py
 """
@@ -20,6 +25,7 @@ rng = np.random.default_rng(42)
 
 
 def check(name, cond, detail=""):
+    """Report one check and return its outcome, for accumulation by main()."""
     status = "PASS" if cond else "FAIL"
     print(f"[{status}] {name}" + (f" -- {detail}" if detail else ""))
     return cond
@@ -112,7 +118,8 @@ def main():
         f"periodic={d_periodic:.3f} noise={d_noise:.3f}",
     )
 
-    # ── full pipeline: pre_processing + extract_features on synthetic PCG-like signal ──
+    # ── full pipeline on a synthetic PCG: two Hanning-windowed bursts per
+    # cardiac cycle (S1 then S2) at ~72 bpm, plus low-level Gaussian noise ──
     heartbeat = np.zeros(len(t))
     beat_period = int(FS / heart_rate_hz)
     for start in range(0, len(heartbeat) - 20, beat_period):
@@ -134,7 +141,7 @@ def main():
     )
 
     print()
-    print("ALL CHECKS PASSED" if all_ok else "SOME CHECKS FAILED -- do not proceed until fixed")
+    print("ALL CHECKS PASSED" if all_ok else "SOME CHECKS FAILED")
     return 0 if all_ok else 1
 
 

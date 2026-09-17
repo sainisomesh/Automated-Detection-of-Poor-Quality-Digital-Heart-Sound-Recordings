@@ -1,57 +1,59 @@
 #!/usr/bin/env python3
 """
-Bootstrap significance testing: each backbone (PANNs / YAMNet / HuBERT) vs.
-AST-QA's own Variable-Noise (noise_0_10) strategy. This is the actual
-comparison Reviewer #7 Comment 2 asks for: "freeze each backbone, attach an
-identical head, train on the identical Variable-Noise strategy, evaluate
-across all 10 lambda levels" -- i.e. AST-QA vs. everything else under the
-SAME training strategy, not against Table 2's per-lambda matched-benchmark
-upper bound (that comparison is what reviewer1_baselines_tang_leal/ uses for
-Tang/Giordano, and is the wrong reference point here).
+Significance testing of each swapped backbone (PANNs CNN14 / YAMNet / HuBERT)
+against the originally published AST-QA model, both with a frozen encoder and
+both trained with the Variable-Noise (noise_0_10) strategy.
 
-METHODOLOGY NOTE -- same disclosed limitation as
-reviewer1_baselines_tang_leal/src/compute_significance.py, for the same
-reason: AST-QA's noise_0_10 strategy was published at 10-fold
-(reproducibility/results/three_strategies_cv/), while the backbone-swap
-experiments ACTUALLY RAN at 3-fold, not the 5-fold this docstring used to
-say. Corrected 2026-09-13 after pulling the real completed Vertex AI results
-from GCS and checking `final_results.json`'s own `n_folds` field directly
-(=3) rather than trusting this file's stale prose. This 3-fold run is the
-CLAUDE.md Sec 9.4 "settled exception": a deliberate first pass on real cloud
-hardware to confirm all three backbones train end-to-end before committing
-budget to the real 5-fold run -- which is STILL PENDING, not something this
-comparison should be mistaken for. Whatever this script reports is provisional
-on that basis, not the final Reviewer #7 Comment 2 number. On top of the
-10-fold-vs-3-fold mismatch, this is an UNPAIRED (independent two-sample)
-bootstrap comparison: pool each side's own held-out predictions across its
-own folds, then resample each side independently. See the sibling script's
-docstring for the full reasoning; it applies here unchanged. Do not describe
-this as a "paired test on matched folds" in any writeup.
+The reference here is deliberately AST-QA's own noise_0_10 strategy from
+../../../results/three_strategies_cv/, not the per-lambda matched benchmark of
+the paper's Table 2. The question being asked is whether AST's advantage is
+architectural, which requires every model to have been trained under the same
+noise strategy; the matched per-lambda benchmark trains a separate model at
+each noise level and is therefore the wrong reference for this comparison.
+(The classical baselines in ../reviewer1_baselines/ use that other reference
+because they are compared against the published per-lambda numbers.)
 
-Directory layouts differ between the two sides being compared:
-  - AST-QA (three_strategies_cv):  fold_X/noise_0_10/lambda_Y.csv
-  - Each backbone (this experiment): lambda_Y/fold_X/predictions.csv
+This script is the frozen-versus-frozen comparison against the published
+model. Its companion, compute_significance_full_paired.py, instead compares
+the fully fine-tuned backbones against the fully fine-tuned AST from
+../reviewer1_unfreezing_ablation/ and, because those two experiments share
+identical per-fold test sets, can use a genuinely paired test. The two are
+complementary and should not be conflated.
 
-SECOND, LARGER DISCLOSED LIMITATION (found + accepted 2026-09-13): on top of
-the 3-fold-vs-10-fold mismatch above, the LOCAL copy of AST-QA's noise_0_10
-raw predictions is itself incomplete -- only fold_1, fold_2, and fold_10 of
-the published 10 exist on this machine at all (folds 3-9 are simply absent
-locally, most likely never fully synced down from the original Vertex
-AI/GCS run given this project's recurring local-disk constraints), and
-fold_2 is further broken (missing 'noise_10' entirely, missing 9/10 lambda
-files for 'noise_0_10', and the one file it does have contains a corrupted
-NaN row). Net effect, verified directly: only 2 usable AST-QA folds are
-available at every lambda except 0.0 (which has 3). `final_results.json`'s
-aggregated numbers still look like genuine 10-fold statistics, so the
-complete data likely still exists on GCS -- recovering it was explicitly
-declined (2026-09-13) in favor of proceeding with whatever is available
-locally, same spirit as the 5-vs-10-fold tradeoff already accepted for
-Tang/Giordano. `pool_ast_qa()` logs a WARNING whenever fewer than 10 folds
-are pooled and records the actual count in every result entry
-(`ast_qa_n_folds`) so this is never silently glossed over. **Any writeup
-using these numbers must state AST-QA's side of this comparison is pooled
-from only ~2 folds, not the full published 10** -- on top of stating the
-comparison is unpaired.
+Test construction and its limitations
+-------------------------------------
+The comparison performed here is UNPAIRED: each side's held-out predictions
+are pooled across its own folds and then resampled independently. It must not
+be described as a paired test on matched folds. Two properties of the
+underlying data make pairing impossible:
+
+  1. The two sides were run with different numbers of folds. The published
+     AST-QA noise_0_10 results are 10-fold; the backbone-swap runs in this
+     package use the fold count documented in ../../README.md. Fold k of one
+     experiment is therefore not the same test set as fold k of the other.
+  2. Only part of AST-QA's raw per-fold prediction CSVs survives. Of the ten
+     published folds, only fold_1, fold_2 and fold_10 exist in
+     ../../../results/three_strategies_cv/raw_predictions/, and fold_2 is
+     itself partial: its 'noise_10' directory is empty, 'noise_0_10' contains
+     only lambda_0.0.csv, and that file carries one row whose filename,
+     y_true and probs are all NaN (an artifact of the original cloud run,
+     dropped on load). In practice two AST-QA folds are usable at every
+     lambda except 0.0, where three are. The aggregated numbers in
+     final_results.json were computed from the complete 10-fold run and are
+     unaffected, but the raw CSVs needed for a resampling test cannot be
+     regenerated, as ../../README.md records.
+
+Consequently, the AST-QA side of every comparison below is pooled from only
+about two folds rather than the published ten. pool_ast_qa() emits a warning
+whenever fewer than ten folds are pooled and records the actual count in the
+`ast_qa_n_folds` field of every result entry; any use of these numbers should
+state both that count and the unpaired construction.
+
+Directory layouts differ between the two sides:
+  - AST-QA (three_strategies_cv):    fold_<K>/noise_0_10/lambda_<L>.csv
+  - Each backbone (this experiment): lambda_<L>/fold_<K>/predictions.csv
+
+Writes results/reviewer7_backbone_swap/significance_vs_ast_qa.json.
 
 Usage:
     python compute_significance_vs_ast.py
@@ -65,10 +67,16 @@ import pandas as pd
 from scipy import stats
 from sklearn.metrics import roc_auc_score
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-AST_QA_DIR = REPO_ROOT / "reproducibility" / "results" / "three_strategies_cv" / "raw_predictions"
-BACKBONE_RESULTS_DIR = REPO_ROOT / "PAPER_REVISIONS" / "reviewer7_backbone_swap" / "results"
-OUTPUT_DIR = REPO_ROOT / "PAPER_REVISIONS" / "reviewer7_backbone_swap" / "results"
+# All inputs and outputs are resolved relative to this file's location
+# (reproducibility/revision/src/reviewer7_backbone_swap/), so the script can be
+# run from any working directory. REVISION_ROOT is reproducibility/revision/;
+# REPRODUCIBILITY_ROOT is the original package alongside it, which holds the
+# published three_strategies_cv results used as the AST-QA reference.
+REVISION_ROOT = Path(__file__).resolve().parents[2]
+REPRODUCIBILITY_ROOT = REVISION_ROOT.parent
+AST_QA_DIR = REPRODUCIBILITY_ROOT / "results" / "three_strategies_cv" / "raw_predictions"
+BACKBONE_RESULTS_DIR = REVISION_ROOT / "results" / "reviewer7_backbone_swap"
+OUTPUT_DIR = REVISION_ROOT / "results" / "reviewer7_backbone_swap"
 
 BACKBONES = ["panns", "yamnet", "hubert"]
 LAMBDAS = [0.0, 0.25, 0.5, 1.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0]
@@ -77,22 +85,18 @@ SEED = 42
 
 
 def pool_ast_qa(lam: float):
-    """AST-QA's noise_0_10 strategy, pooled across whatever folds actually
-    have a raw predictions file for this lambda.
+    """Pool AST-QA's noise_0_10 predictions at one lambda.
 
-    KNOWN DATA GAP (found 2026-09-13, not something this script caused):
-    the local copy of reproducibility/results/three_strategies_cv/raw_predictions
-    is INCOMPLETE for fold_2 -- 'noise_10' has zero files and 'noise_0_10' has
-    only lambda_0.0.csv (which itself has one corrupted row: filename/y_true/
-    probs all NaN, with a leftover '/gcs/heart-quality-training-78e/...' path,
-    i.e. a real artifact from wherever this was originally run on Vertex AI,
-    not something introduced locally). reproducibility/results/per_lambda_cv
-    (used for the Tang/Giordano comparison) was checked and is fully complete
-    at 10 folds x 10 lambdas -- this gap is specific to three_strategies_cv.
-    Until this is resolved (recovering a complete copy, or explicitly
-    accepting fold_2 as missing), the number of AST-QA folds contributing to
-    each lambda is NOT constant across the sweep -- this function logs that
-    count every call so it's never silently inconsistent.
+    Returns (y_true, probs, n_folds_used) concatenated over every fold that
+    has a readable raw-predictions CSV for this lambda, or (None, None, 0) if
+    none does. Rows with NaN in y_true or probs are dropped.
+
+    The returned fold count is not constant across the sweep, because the
+    surviving raw CSVs are incomplete: see the module docstring. Callers are
+    expected to report n_folds_used alongside any statistic derived from this
+    pool. The gap is specific to three_strategies_cv; the per_lambda_cv
+    results used by the classical baselines are complete at 10 folds x 10
+    lambdas.
     """
     y_true_all, probs_all = [], []
     n_folds_used = 0
@@ -112,6 +116,9 @@ def pool_ast_qa(lam: float):
 
 
 def pool_ast_qa_per_fold_auroc(lam: float):
+    """AST-QA's AUROC computed separately within each available fold, at one
+    lambda. These per-fold values are the observations fed to the Welch
+    t-test; folds whose AUROC is undefined (single-class) are skipped."""
     aurocs = []
     for fold_dir in sorted(AST_QA_DIR.glob("fold_*")):
         csv_path = fold_dir / "noise_0_10" / f"lambda_{lam}.csv"
@@ -128,7 +135,9 @@ def pool_ast_qa_per_fold_auroc(lam: float):
 
 
 def pool_backbone(backbone: str, lam: float):
-    """A backbone's predictions, pooled across all its own (5) folds."""
+    """Pool one backbone's frozen-mode predictions at one lambda, across all
+    of its own folds. Returns (y_true, probs), or (None, None) if this
+    backbone has no results for that lambda."""
     lam_dir = BACKBONE_RESULTS_DIR / backbone / "raw_predictions" / f"lambda_{lam}"
     if not lam_dir.exists():
         return None, None
@@ -146,6 +155,8 @@ def pool_backbone(backbone: str, lam: float):
 
 
 def pool_backbone_per_fold_auroc(backbone: str, lam: float):
+    """One backbone's per-fold AUROCs at one lambda, as the second sample for
+    the Welch t-test."""
     lam_dir = BACKBONE_RESULTS_DIR / backbone / "raw_predictions" / f"lambda_{lam}"
     if not lam_dir.exists():
         return []
@@ -163,8 +174,14 @@ def pool_backbone_per_fold_auroc(backbone: str, lam: float):
 
 
 def bootstrap_auroc_diff(y_true_a, probs_a, y_true_b, probs_b, B=1000, seed=42):
-    """Independent bootstrap: resample each side's pooled predictions
-    separately (NOT paired -- different underlying test sets/fold counts)."""
+    """Two-sample (unpaired) bootstrap of the AUROC difference.
+
+    Each side's pooled predictions are resampled with replacement
+    independently, because the two sides come from different test sets and
+    different numbers of folds and cannot be matched case by case. Returns
+    the B resampled differences (side A minus side B); an undefined AUROC in
+    a resample contributes the chance value 0.5.
+    """
     rng = np.random.default_rng(seed)
     n_a, n_b = len(y_true_a), len(y_true_b)
     diffs = np.empty(B)
@@ -184,6 +201,14 @@ def bootstrap_auroc_diff(y_true_a, probs_a, y_true_b, probs_b, B=1000, seed=42):
 
 
 def compare_backbone(backbone: str):
+    """Compare AST-QA against one backbone at every lambda in the sweep.
+
+    Per lambda, reports the pooled AUROC of each side, their difference, a
+    95% percentile interval and two-sided p-value from the unpaired bootstrap,
+    a Welch t-test over the two sets of per-fold AUROCs (reported only when
+    both sides have at least two usable folds), and the number of folds each
+    side contributed.
+    """
     results = {}
     for lam in LAMBDAS:
         ast_y, ast_p, ast_n_folds_pooled = pool_ast_qa(lam)
@@ -233,19 +258,17 @@ def compare_backbone(backbone: str):
 def main():
     out = {
         "methodology_note": (
-            "UNPAIRED comparison -- AST-QA's noise_0_10 (Variable-Noise) strategy, "
-            "published at 10-fold in reproducibility/results/three_strategies_cv/, vs. "
-            "each backbone at 3-fold -- a first-pass real-hardware validation run per "
-            "CLAUDE.md Sec 9.4's settled exception, NOT the final 5-fold Reviewer #7 number "
-            "(that run is still pending). Corrected from a stale '5-fold' claim this docstring "
-            "Sec 9.4). Not a paired test on matched folds. ADDITIONALLY: the local copy "
-            "of AST-QA's raw predictions only has fold_1/fold_2/fold_10 of the published "
-            "10 (fold_2 itself partial) -- AST-QA's side of every comparison below is "
-            "pooled from ~2 folds (3 at lambda=0.0), not the full 10. Check each entry's "
-            "'ast_qa_n_folds' field. Accepted explicitly on 2026-09-13 rather than "
-            "recovering the complete data from GCS -- see module docstring. Also note: "
-            "the backbone side of this comparison is the 3-fold first-pass validation run, "
-            "not the pending final 5-fold run -- see module docstring."
+            "UNPAIRED comparison. The AST-QA side is the published variable-noise "
+            "(noise_0_10) model evaluated at 10-fold, read from "
+            "results/three_strategies_cv/; each alternative backbone was evaluated at "
+            "3-fold. Because the two sides use different fold structures, the held-out "
+            "items do not correspond and this is not a paired test. A further limitation: "
+            "only part of the published model's raw per-fold prediction CSVs survives "
+            "(fold_1, fold_2 and fold_10, with fold_2 itself incomplete), so the AST-QA "
+            "side of each comparison below is pooled from the folds that are available "
+            "rather than all 10. The 'ast_qa_n_folds' field on each entry records how "
+            "many were actually used. For the paired, same-fold-count comparison against "
+            "the fully fine-tuned model, see compute_significance_full_paired.py."
         ),
         "bootstrap_iterations": B,
         "seed": SEED,

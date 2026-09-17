@@ -1,104 +1,79 @@
 #!/usr/bin/env python3
 """
-Frozen vs. Full vs. Top-K Backbone Unfreezing Ablation (Reviewer #1, Comment 2).
+Backbone unfreezing ablation: frozen vs. full fine-tuning vs. top-K unfreezing.
 
-Trains ONE unfreeze-mode variant per invocation (mirrors
-../../reviewer7_backbone_swap/src/train_backbone_swap_cv.py's one-backbone-
-per-invocation design -- lets each mode run as its own parallel Vertex AI
-job once GPU quota allows):
+Runs patient-level cross-validation for ONE backbone adaptation mode per
+invocation, evaluating the resulting model over the full noise-intensity
+(lambda) sweep. One mode per process keeps each condition independently
+schedulable as its own GPU job.
 
-  --unfreeze_mode frozen              Mode A: fully frozen encoder (baseline
-                                       reproduction -- trains only the 0.11M
-                                       qa_classifier head, same as the
-                                       published Table 2 / Figure 3 models).
-  --unfreeze_mode full                Mode B: all 12 ViT layers unfrozen,
-                                       trained end-to-end at a lower backbone
-                                       LR than the head.
+Modes:
+  --unfreeze_mode frozen              Encoder entirely frozen; only the small
+                                      binary QA head (~0.1M parameters)
+                                      trains. This is the configuration used
+                                      for the paper's main results and serves
+                                      as the ablation's reference condition.
+  --unfreeze_mode full                All 12 transformer blocks trained
+                                      end-to-end, with the backbone on a
+                                      lower learning rate than the head.
   --unfreeze_mode topk --topk_layers {2,4}
-                                       Mode C: head-only warmup for
-                                       --topk_warmup_epochs, then unfreeze
-                                       the top K transformer layers (closest
-                                       to the classifier) and continue
-                                       training.
+                                      Progressive schedule in two real
+                                      training phases: --topk_warmup_epochs
+                                      of head-only training with the encoder
+                                      frozen, then the LAST K transformer
+                                      blocks (plus the final layernorm) are
+                                      unfrozen, the optimizer is rebuilt, and
+                                      training continues for the remaining
+                                      epochs.
 
-All variants train on the Variable-Noise (U[0,10]) strategy ONLY -- this is
-the reviewer comment's own scope (CLAUDE.md Sec 9.1 Comment 2 explicitly
-says "using the primary Variable-Noise strategy", not all three Figure 3
-strategies) -- and are evaluated across all 10 lambda test levels.
+Training-set noise strategy is selected with --noise_strategy and matches the
+three strategies compared in the paper:
+  variable_0_10 (default)  lambda ~ Uniform[0, 10] drawn per noisy sample.
+  clean                    lambda = 0.0 for every sample (clean-only training).
+  fixed_10                 lambda = 10.0 for every noisy sample.
 
-Audio pipeline (load_audio / mix_rms / get_noise) and dataset construction
-(VariableNoiseTrainDataset / FixedLambdaEvalDataset) are copied verbatim
-from reproducibility/src/train_per_lambda_cv.py's PerLambdaDataset and
-train_three_strategies_cv.py's ThreeStrategyDataset 'noise_0_10' branch --
-same pipeline every other method in this revision (AST-QA baseline, Tang,
-Giordano, the backbone-swap experiment) is evaluated on. Only the model
-class changes (ASTHeartQAUnfreeze instead of ASTHeartQA / BackboneQAHead).
+The audio pipeline (load_audio / mix_rms / get_noise) and the dataset
+construction are reproduced unchanged from the main package's
+src/train_per_lambda_cv.py and src/train_three_strategies_cv.py, so every
+method compared in the revision (frozen AST-QA, the classical baselines, the
+alternative backbones) sees identical inputs. Only the model class differs
+here.
 
-Fold count: 3-fold (KFold(n_splits=3, shuffle=True, random_state=42), same
-construction as ../../fold_assignments/patient_folds_3fold.csv) for the
-ORIGINAL 4-condition ablation run (2026-09-13/14). This was a SECOND,
-explicit deviation on top of the already-documented 5-fold-instead-
-of-10-fold policy in CLAUDE.md Sec 9.4: 5-fold is PAPER_REVISIONS' own
-default for new experiments, but this specific experiment was deliberately
-dropped to 3-fold (decided 2026-09-13, see ../README.md "Why 3-fold, not
-5-fold") to bound wall-clock/cost given how much heavier full/topk-mode
-backward passes are than the frozen baseline's head-only training. This
-must be stated explicitly in any writeup that cites these numbers -- never
-presented next to the published 10-fold Table 2/Figure 3 results, or even
-next to this revision's OTHER 5-fold PAPER_REVISIONS results, without
-flagging the further fold-count drop.
+Cross-validation splits are patient-level: recordings are grouped by the
+patient id parsed from the filename (`13918_AV.wav` -> `13918`) and whole
+patients are assigned to folds, so no patient contributes recordings to both
+the training and test side of a fold. Splits are regenerated deterministically
+from KFold(n_splits=--n_folds, shuffle=True, random_state=--seed) over the
+sorted patient ids, which reproduces the frozen assignments recorded in
+revision/fold_assignments/patient_folds_{3,5}fold.csv.
 
---noise_strategy (added 2026-09-15): after seeing --unfreeze_mode full beat
-frozen at every lambda (see ../README.md "Results"), the PI decided to
-adopt the unfrozen backbone as the new candidate deployed model, which
-means it needs to be trained under the OTHER two Figure-3 strategies too --
-clean-only and fixed-noise (lambda_train=10) -- not just variable-noise
-U[0,10]. Rather than duplicating the whole CV harness, this flag repurposes
-the existing training-set construction (which already knows how to build a
-'mixed' clean+heart sample) to fix the sampled lambda instead of drawing it
-from U[0,10]:
-  --noise_strategy variable_0_10 (default)  lambda ~ Uniform[0, 10] per
-                                             mixed sample -- ORIGINAL,
-                                             UNCHANGED behavior. Omitting
-                                             --noise_strategy entirely
-                                             reproduces the existing 3-fold
-                                             full/frozen/topk2/topk4 results
-                                             byte-for-byte -- nothing about
-                                             the default path changed.
-  --noise_strategy clean                    lambda = 0.0 for every mixed
-                                             sample (equivalent to
-                                             reproducibility/train_three_
-                                             strategies_cv.py's 'clean').
-  --noise_strategy fixed_10                 lambda = 10.0 for every mixed
-                                             sample (equivalent to that
-                                             script's 'noise_10').
-These new strategies are intended to run at 5-fold (PAPER_REVISIONS'
-default, per CLAUDE.md Sec 9.4), NOT 3-fold -- the 3-fold drop above was
-scoped to the original 4-condition ablation's cost concerns, not to this
-new direction. See ../README.md "2026-09-15: PI-directed pivot to unfrozen
-backbone" for why the existing 3-fold full/variable_0_10 result is being
-rerun at 5-fold rather than reused as-is.
+Outputs (under --output_dir):
+  raw_predictions/lambda_<L>/fold_<N>/predictions.csv   filename, y_true, probs
+  unfreezing_ablation_progress.json                     per-fold metrics, written
+                                                        after every fold
+  unfreezing_ablation_final_results.json                aggregated mean + CI
+  unfreezing_ablation_metrics_<tag>.csv                 per-lambda mean metrics
+  convergence_log.csv                                   per-epoch loss, wall-clock
+                                                        time and peak GPU memory,
+                                                        for the convergence-speed
+                                                        and memory-footprint
+                                                        comparison between modes
 
-Output layout matches the backbone-swap experiment for direct comparability:
-  raw_predictions/lambda_X/fold_Y/predictions.csv  (filename, y_true, probs)
-  unfreezing_ablation_progress.json, unfreezing_ablation_metrics_<tag>.csv,
-  convergence_log.csv (per-epoch loss, wall-clock time, peak GPU memory --
-  CLAUDE.md Sec 9.1 Comment 2 explicitly asks for convergence speed and GPU
-  memory footprint to be reported alongside test performance).
-
-GPU-heavy for --unfreeze_mode full/topk -- meant to run as a Vertex AI job.
-DO NOT submit to Vertex without explicit confirmation. Use --limit_patients /
---n_folds 2 / --epochs 1 (with --topk_warmup_epochs 0 for topk) for local
-smoke-testing.
+The full and top-K modes backpropagate into the 86M-parameter backbone and are
+intended to run on a GPU; --grad_checkpointing reduces their activation memory.
+For a local smoke test, combine --limit_patients with small --n_folds /
+--epochs values (and --topk_warmup_epochs 0 for the top-K mode).
 
 Usage:
     python train_unfreezing_ablation_cv.py --unfreeze_mode frozen \\
-        --data_dir ../../../data_processed/ --output_dir ../results/frozen/ \\
-        --n_folds 3 --seed 42
+        --data_dir ../../../dataset/ \\
+        --output_dir ../../results/reviewer1_unfreezing_ablation/frozen_5fold/ \\
+        --n_folds 5 --epochs 5 --seed 42
 
     python train_unfreezing_ablation_cv.py --unfreeze_mode topk --topk_layers 4 \\
-        --data_dir ../../../data_processed/ --output_dir ../results/topk4/ \\
-        --n_folds 3 --epochs 5 --topk_warmup_epochs 2 --seed 42
+        --data_dir ../../../dataset/ \\
+        --output_dir ../../results/reviewer1_unfreezing_ablation/topk4_5fold/ \\
+        --n_folds 5 --epochs 5 --topk_warmup_epochs 2 --seed 42
 """
 
 import argparse
@@ -137,6 +112,7 @@ MAX_LENGTH = TARGET_SR * DURATION
 
 
 def set_seed(seed):
+    """Seed Python, NumPy and PyTorch RNGs so a run is reproducible."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -144,11 +120,21 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-# --- verbatim block, copied from reproducibility/src/train_per_lambda_cv.py ---
-# (same audio pipeline AST-QA, Tang, Giordano, and the backbone-swap
-# experiment are all evaluated on -- must stay byte-identical)
+# --- Audio pipeline, reproduced unchanged from src/train_per_lambda_cv.py. ---
+# Every method compared in the revision shares this pipeline, so it must stay
+# identical across scripts rather than being refactored into a shared import
+# that could drift.
 def load_audio(path):
-    """Load and preprocess a single audio file."""
+    """Load one file as a fixed-length, normalized 16 kHz mono waveform.
+
+    Resamples to TARGET_SR, removes the DC offset, band-passes to the
+    20-1000 Hz range where heart-sound energy lives (2nd-order high-pass,
+    5th-order low-pass), and peak-normalizes. The result is trimmed or
+    loop-padded (np.tile) to exactly MAX_LENGTH samples (10 s).
+
+    Returns None for unreadable, too-short (<100 samples) or effectively
+    silent files, which callers replace with a zero-filled waveform.
+    """
     try:
         wav, _ = librosa.load(path, sr=TARGET_SR, mono=True)
     except Exception:
@@ -173,7 +159,14 @@ def load_audio(path):
 
 
 def mix_rms(heart, noise, lam):
-    """Mix heart sound with noise at a given lambda using RMS-based scaling."""
+    """Add noise to a heart sound at RMS-matched intensity lambda.
+
+    The noise is rescaled so its RMS equals the heart sound's before being
+    weighted by lambda, so lambda is an energy ratio rather than an absolute
+    gain: lambda = 1 gives 0 dB SNR, lambda = 10 gives ten times the cardiac
+    RMS energy. The mixture is rescaled if it would otherwise clip beyond
+    +/-1.0.
+    """
     if lam == 0:
         return heart
     rms_h = np.sqrt(np.mean(heart ** 2))
@@ -189,8 +182,20 @@ def mix_rms(heart, noise, lam):
 
 
 def get_noise(icbhi_files, env_files, idx=None):
-    """Structured noise: lung + 0.5*env, peak-normalized -- identical
-    formula to train_per_lambda_cv.py's PerLambdaDataset.get_noise."""
+    """Build one composite interference waveform: lung + 0.5 * environmental.
+
+    A respiratory recording (ICBHI 2017) is summed with a half-weighted
+    environmental clip (ESC-50 / UrbanSound8K) and peak-normalized, modelling
+    clinical auscultation in which internal physiological interference
+    dominates ambient noise.
+
+    Args:
+        idx: When given, the two source clips are drawn from a local RNG
+            seeded by idx, so evaluation sample `idx` always receives the same
+            interference across lambdas, folds and modes; comparisons are then
+            matched rather than confounded by noise resampling. When None the
+            global RNG is used, giving fresh noise on every training epoch.
+    """
     if idx is not None:
         rng = random.Random(42 + idx)
     else:
@@ -204,21 +209,28 @@ def get_noise(icbhi_files, env_files, idx=None):
             combined = combined / peak
         return combined
     return np.zeros(MAX_LENGTH)
-# --- end verbatim block ---
+# --- end of reproduced audio pipeline ---
 
 
 class StrategyTrainDataset(Dataset):
-    """Training set supporting all three Figure-3 noise strategies -- identical
-    construction to ThreeStrategyDataset in train_three_strategies_cv.py (and
-    to the backbone-swap experiment's dataset of the same name), plus the
-    ASTFeatureExtractor step AST needs (unlike the backbone-swap variant,
-    which hands raw waveforms to each backbone's own front-end).
+    """Class-balanced training set for any of the three noise strategies.
 
-    Renamed from VariableNoiseTrainDataset (2026-09-15) when --noise_strategy
-    was added -- this class now also serves 'clean' and 'fixed_10', so a
-    name implying it only does variable-noise would be misleading. Passing
-    noise_strategy='variable_0_10' (the default) reproduces the original
-    class's exact behavior."""
+    Each heart recording contributes two positive (label 1) samples: the clean
+    waveform and a noise-mixed version whose lambda is set by
+    `noise_strategy`. An equal number of noise-only negatives (label 0) is
+    added, giving a 50/50 class balance. Waveforms are converted to AST
+    log-mel features by `processor`.
+
+    Construction matches ThreeStrategyDataset in
+    src/train_three_strategies_cv.py, including the fact that the 'clean'
+    strategy yields two clean copies per recording (its "mixed" sample is
+    mixed at lambda = 0), so sample counts are identical across strategies.
+
+    Args:
+        noise_strategy: 'variable_0_10' draws lambda ~ Uniform[0, 10] per
+            noisy sample; 'fixed_10' uses lambda = 10.0; 'clean' uses
+            lambda = 0.0.
+    """
 
     def __init__(self, heart_files, icbhi_files, env_files, processor, noise_strategy="variable_0_10"):
         self.icbhi_files = icbhi_files
@@ -267,9 +279,16 @@ class StrategyTrainDataset(Dataset):
 
 
 class FixedLambdaEvalDataset(Dataset):
-    """Fixed test-lambda eval set -- identical construction to
-    train_per_lambda_cv.py's PerLambdaDataset / the backbone-swap
-    experiment's dataset of the same name, plus the ASTFeatureExtractor step."""
+    """Balanced evaluation set at a single fixed test lambda.
+
+    Indices [0, n) are the heart recordings mixed at `lambda_val` (label 1);
+    indices [n, 2n) are noise-only clips (label 0). Noise is drawn with the
+    index-seeded RNG, so the same evaluation index always gets the same
+    interference regardless of lambda, fold or model, which makes results at
+    different lambdas directly comparable.
+
+    Construction matches PerLambdaDataset in src/train_per_lambda_cv.py.
+    """
 
     def __init__(self, heart_files, icbhi_files, env_files, lambda_val, processor):
         self.icbhi_files = icbhi_files
@@ -302,10 +321,11 @@ class FixedLambdaEvalDataset(Dataset):
         }
 
 
-# --- GCS helpers, copied verbatim from ../../reviewer7_backbone_swap/src/train_backbone_swap_cv.py
-# (itself copied from phase6_paper_quality/src/train_quality_vertexai.py --
-# established convention for this repo's Vertex AI jobs) ---
+# --- Google Cloud Storage helpers, used only when this script runs as a
+# managed cloud training job (--gcs_bucket). They are a no-op for local runs,
+# and `google-cloud-storage` is imported lazily so it is not a hard dependency. ---
 def download_from_gcs(bucket_name, prefix, local_dir):
+    """Mirror every object under gs://bucket/prefix into local_dir."""
     from google.cloud import storage
     logger.info(f"Downloading from gs://{bucket_name}/{prefix} -> {local_dir}")
     os.makedirs(local_dir, exist_ok=True)
@@ -326,6 +346,7 @@ def download_from_gcs(bucket_name, prefix, local_dir):
 
 
 def upload_to_gcs(bucket_name, local_dir, prefix):
+    """Upload local_dir recursively to gs://bucket/prefix."""
     from google.cloud import storage
     client = storage.Client()
     bucket = client.bucket(bucket_name)
@@ -336,18 +357,28 @@ def upload_to_gcs(bucket_name, local_dir, prefix):
             blob_path = f"{prefix}/{rel}"
             bucket.blob(blob_path).upload_from_filename(local_path)
     logger.info(f"Uploaded {local_dir} -> gs://{bucket_name}/{prefix}")
-# --- end GCS helpers ---
+# --- end of cloud-storage helpers ---
 
 
 def mode_tag(unfreeze_mode, topk_layers):
+    """Short label for a condition, used in log lines and output filenames."""
     return unfreeze_mode if unfreeze_mode != "topk" else f"topk{topk_layers}"
 
 
 def build_optimizer(model, phase, head_lr, backbone_lr):
-    """phase='frozen' -> head params only. phase in {'full','topk'} -> two
-    param groups (head at head_lr, currently-trainable backbone params at
-    the lower backbone_lr, per CLAUDE.md Sec 9.1 Comment 2's "lower learning
-    rate" instruction for Mode B)."""
+    """Build the AdamW optimizer for the given training phase.
+
+    With a frozen encoder there is only one parameter group, the QA head at
+    `head_lr`. Once any part of the backbone is trainable, the optimizer uses
+    two groups: the head stays at `head_lr` while the unfrozen pretrained
+    encoder parameters are trained at the lower `backbone_lr`, so fine-tuning
+    perturbs the AudioSet representation far less than it adapts the
+    randomly-initialized head.
+
+    Because the group membership is read from the model's current
+    `requires_grad` flags, this must be called again after any change of
+    freeze policy (e.g. at the end of the top-K warmup phase).
+    """
     if phase == "frozen":
         return torch.optim.AdamW(model.qa_classifier.parameters(), lr=head_lr)
     backbone_params = model.trainable_backbone_parameters()
@@ -359,6 +390,13 @@ def build_optimizer(model, phase, head_lr, backbone_lr):
 
 def run_training_epochs(model, loader, optimizer, criterion, device, epochs, phase_label, fold,
                          convergence_rows, mode_label):
+    """Train for `epochs` epochs, appending one convergence row per epoch.
+
+    Each row records the mean loss, wall-clock duration and peak GPU memory
+    (None on CPU) so convergence speed and memory footprint can be compared
+    across unfreezing modes. `phase_label` distinguishes the warmup and
+    unfrozen phases of the progressive schedule within one mode.
+    """
     for epoch in range(epochs):
         model.train()
         if torch.cuda.is_available():
@@ -390,6 +428,16 @@ def run_training_epochs(model, loader, optimizer, criterion, device, epochs, pha
 
 
 def train_model(unfreeze_mode, topk_layers, train_loader, fold, device, args, convergence_rows):
+    """Train one model for one fold under the requested unfreezing mode.
+
+    The "frozen" and "full" modes are a single training phase. The "topk" mode
+    runs two phases: `args.topk_warmup_epochs` of head-only training with the
+    encoder frozen, then the top-K blocks are unfrozen, a new optimizer is
+    built over the enlarged trainable set, and the remaining
+    `args.epochs - args.topk_warmup_epochs` epochs are run.
+
+    Returns the trained model.
+    """
     tag = mode_tag(unfreeze_mode, topk_layers)
     logger.info(f"  --> [Train] mode={tag} fold={fold}")
     criterion = nn.BCEWithLogitsLoss()
@@ -397,13 +445,14 @@ def train_model(unfreeze_mode, topk_layers, train_loader, fold, device, args, co
     if unfreeze_mode != "topk":
         model = ASTHeartQAUnfreeze(unfreeze_mode=unfreeze_mode, topk_layers=0).to(device)
         if args.grad_checkpointing and unfreeze_mode == "full":
-            # use_reentrant=False is required, not a style choice -- with the
-            # reentrant (default) implementation, if a checkpointed layer's
-            # INPUT activation doesn't require grad (irrelevant for 'full',
-            # where every input does, but load-bearing for 'topk' below),
-            # the checkpoint silently drops gradients for that layer's own
-            # trainable parameters. See test_unfreeze_ast_qa.py check 9 and
-            # ../README.md "Real bug found during the second audit pass".
+            # use_reentrant=False is required, not a stylistic preference: the
+            # default reentrant torch.utils.checkpoint implementation drops the
+            # gradients of a checkpointed block's own trainable parameters
+            # whenever the activation entering that block does not require
+            # grad. That situation cannot arise in "full" mode (the embeddings
+            # are trainable, so every activation requires grad) but does arise
+            # in "topk" mode, and the same keyword is used in both places so
+            # the two code paths cannot diverge.
             model.encoder.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         logger.info(f"  {tag}: trainable params = {model.num_trainable_parameters():,} "
                     f"/ {model.num_total_parameters():,}")
@@ -412,23 +461,24 @@ def train_model(unfreeze_mode, topk_layers, train_loader, fold, device, args, co
                              args.epochs, tag, fold, convergence_rows, tag)
         return model
 
-    # topk: Phase 1 -- head-only warmup, encoder fully frozen.
+    # Phase 1: head-only warmup with the encoder fully frozen.
     model = ASTHeartQAUnfreeze(unfreeze_mode="frozen").to(device)
     if args.topk_warmup_epochs > 0:
         optimizer = build_optimizer(model, "frozen", args.head_lr, args.backbone_lr)
         run_training_epochs(model, train_loader, optimizer, criterion, device,
                              args.topk_warmup_epochs, f"{tag}-warmup", fold, convergence_rows, tag)
 
-    # Phase 2 -- unfreeze the top-K layers, continue training.
+    # Phase 2: unfreeze the top-K blocks and continue training with a
+    # two-group optimizer over the enlarged trainable set.
     model.set_unfreeze_mode("topk", topk_layers=topk_layers)
     if args.grad_checkpointing:
-        # use_reentrant=False is REQUIRED here, not optional: layers 0..(12-K-1)
-        # are frozen (including embeddings), so the activation flowing into the
-        # first unfrozen layer has requires_grad=False. The default reentrant
-        # checkpoint implementation silently drops that first unfrozen layer's
-        # own parameter gradients in exactly this situation -- confirmed as a
-        # real bug (not just a benign warning) by test_unfreeze_ast_qa.py check 9,
-        # which failed with reentrant checkpointing and passes with this fix.
+        # use_reentrant=False is mandatory in this mode. Blocks 0..(12-K-1) and
+        # the patch embeddings stay frozen, so the activation entering the first
+        # unfrozen block has requires_grad=False. Under the default reentrant
+        # torch.utils.checkpoint implementation that causes the checkpointed
+        # block's own parameter gradients to be dropped, which would train the
+        # first unfrozen block not at all while reporting a normal-looking loss
+        # curve. Checked by test_unfreeze_ast_qa.py check 9.
         model.encoder.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     logger.info(f"  {tag}: trainable params after unfreeze = {model.num_trainable_parameters():,} "
                 f"/ {model.num_total_parameters():,}")
@@ -446,6 +496,12 @@ def train_model(unfreeze_mode, topk_layers, train_loader, fold, device, args, co
 
 
 def compute_metrics(y_true, probs):
+    """Compute the six reported metrics at the fixed 0.5 decision threshold.
+
+    Returns AUROC, AUPRC, F1, accuracy, sensitivity and specificity. AUROC and
+    AUPRC fall back to 0.5 / 0.0 if the label set is degenerate (single class),
+    which can only happen on very small debug runs.
+    """
     preds = (probs > 0.5).astype(int)
     try:
         auroc = roc_auc_score(y_true, probs)
@@ -468,6 +524,13 @@ def compute_metrics(y_true, probs):
 
 
 def evaluate_fold(model, hearts, icbhi, env, processor, device, batch_size, output_dir, fold, lambdas):
+    """Evaluate one trained fold model at every lambda in the sweep.
+
+    Writes the raw per-clip predictions for each lambda to
+    raw_predictions/lambda_<L>/fold_<N>/predictions.csv so that every reported
+    metric can be recomputed from the stored probabilities, and returns the
+    metrics keyed by lambda.
+    """
     per_lambda_metrics = {}
     for lam in lambdas:
         ds = FixedLambdaEvalDataset(hearts, icbhi, env, lam, processor)
@@ -498,12 +561,13 @@ def evaluate_fold(model, hearts, icbhi, env, processor, device, batch_size, outp
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Unfreezing ablation (Reviewer #1, Comment 2)")
+    parser = argparse.ArgumentParser(description="AST backbone unfreezing ablation, patient-level CV")
     parser.add_argument("--unfreeze_mode", type=str, required=True, choices=["frozen", "full", "topk"])
     parser.add_argument("--topk_layers", type=int, default=0, choices=[0, 2, 4],
                          help="Required (2 or 4) when --unfreeze_mode topk")
     parser.add_argument("--data_dir", type=str, default=None,
-                         help="Local data dir. Required unless --gcs_bucket is set.")
+                         help="Dataset root containing PhysioNet2022/, ICBHI2017/, ESC-50/ and "
+                              "UrbanSound8K/. Required unless --gcs_bucket is set.")
     parser.add_argument("--output_dir", type=str, default=None,
                          help="Local output dir. Defaults to a temp dir when --gcs_bucket is set.")
     parser.add_argument("--gcs_bucket", type=str, default=None,
@@ -513,39 +577,38 @@ def main():
     parser.add_argument("--output_prefix", type=str, default=None,
                          help="Defaults to results/unfreezing_ablation/<mode_tag>/")
     parser.add_argument("--n_folds", type=int, default=3,
-                         help="3-fold per this experiment's own documented deviation on top of "
-                              "PAPER_REVISIONS' 5-fold default -- see README.md 'Why 3-fold, not 5-fold'")
+                         help="Number of patient-level CV folds; see the package README for the "
+                              "fold count used for each reported result")
     parser.add_argument("--epochs", type=int, default=5, help="Total epochs (includes warmup for topk)")
     parser.add_argument("--topk_warmup_epochs", type=int, default=2,
                          help="Head-only warmup epochs before unfreezing top-K layers (topk mode only)")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--head_lr", type=float, default=1e-4)
     parser.add_argument("--backbone_lr", type=float, default=5e-5,
-                         help="LR for unfrozen encoder layers (full/topk). CLAUDE.md Sec 9.1 "
-                              "Comment 2 suggests 1e-5 or 5e-5 for Mode B.")
+                         help="Learning rate for the unfrozen encoder parameters (full/topk "
+                              "modes); deliberately lower than --head_lr")
     parser.add_argument("--grad_checkpointing", action="store_true",
-                         help="Enable gradient checkpointing on the encoder -- recommended for "
-                              "--unfreeze_mode full on L4 (24GB), which has less VRAM than the "
-                              "A100 the original runs used.")
+                         help="Trade compute for memory by checkpointing encoder activations. "
+                              "Only has an effect when part of the encoder is trainable; "
+                              "needed to fit --unfreeze_mode full on a 24 GB GPU.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default=None, help="cuda|mps|cpu (default: auto-detect cuda>cpu)")
     parser.add_argument("--limit_patients", type=int, default=0,
-                         help="If >0, only use this many patients (for smoke-testing)")
+                         help="If >0, use only the first this-many patients. For smoke tests only: "
+                              "it changes the patient set and therefore the fold membership.")
     parser.add_argument("--lambdas", type=str, default="0,0.25,0.5,1,5,10,25,50,75,100",
-                         help="Comma-separated lambda sweep (override with a short list for smoke-testing)")
+                         help="Comma-separated test-time lambda sweep (shorten it for smoke tests)")
     parser.add_argument("--noise_strategy", type=str, default="variable_0_10",
                          choices=["variable_0_10", "clean", "fixed_10"],
-                         help="Training-set noise strategy (added 2026-09-15 for the PI-directed "
-                              "pivot to the unfrozen backbone -- see module docstring). Default "
-                              "'variable_0_10' reproduces the original ablation's exact behavior.")
+                         help="Noise strategy used to build the training set; see module docstring")
     args = parser.parse_args()
 
     if args.unfreeze_mode == "topk" and args.topk_layers not in (2, 4):
         parser.error("--topk_layers must be 2 or 4 when --unfreeze_mode topk")
     if args.unfreeze_mode == "topk" and args.epochs <= args.topk_warmup_epochs:
-        # Fail before any training happens, not after wasting a warmup epoch's
-        # worth of GPU time on a real job -- train_model() also re-checks this
-        # right before Phase 2 as a defense-in-depth safety net.
+        # Reject the configuration up front rather than after spending the
+        # warmup epochs; train_model() repeats the check before phase 2 so the
+        # invariant also holds when it is called programmatically.
         parser.error(
             f"--epochs ({args.epochs}) must be greater than --topk_warmup_epochs "
             f"({args.topk_warmup_epochs}) so the top-{args.topk_layers} layers actually "
@@ -553,12 +616,13 @@ def main():
         )
     if not args.gcs_bucket and not args.data_dir:
         parser.error("--data_dir is required unless --gcs_bucket is set")
+    if not args.gcs_bucket and not args.output_dir:
+        parser.error("--output_dir is required unless --gcs_bucket is set")
 
     set_seed(args.seed)
     lambdas = [float(x) for x in args.lambdas.split(",")]
-    # Only suffix the tag when noise_strategy deviates from the original
-    # default -- keeps the existing full/frozen/topk2/topk4 output paths
-    # (and the already-published 3-fold results under them) untouched.
+    # The strategy is only appended to the tag when it is not the default, so
+    # that output paths for the variable-noise runs stay stable.
     tag = mode_tag(args.unfreeze_mode, args.topk_layers)
     if args.noise_strategy != "variable_0_10":
         tag = f"{tag}_{args.noise_strategy}"
@@ -588,6 +652,10 @@ def main():
     if not heart_files:
         raise ValueError(f"No heart audio files found in {data_dir}")
 
+    # Group recordings by patient: filenames are "<patient_id>_<valve>.wav",
+    # so the id is the part before the first underscore. Folds are drawn over
+    # patient ids, never over individual files, which is what keeps all four
+    # auscultation-point recordings of a patient on the same side of a split.
     patient_map = {}
     for f in heart_files:
         pid = f.name.split("_")[0]
@@ -604,6 +672,9 @@ def main():
         num_mel_bins=128, max_length=1024, sampling_rate=16000, f_min=0, f_max=8000
     )
 
+    # Folds are over the sorted patient id list with a fixed seed, so the
+    # assignment is identical across modes, strategies and reruns, and matches
+    # the checked-in fold assignment CSVs for the same n_folds and seed.
     kf = KFold(n_splits=args.n_folds, shuffle=True, random_state=args.seed)
     all_fold_metrics = []
     convergence_rows = []
@@ -615,6 +686,10 @@ def main():
         train_hearts = [f for p in train_pids for f in patient_map[p]]
         test_hearts = [f for p in test_pids for f in patient_map[p]]
 
+        # The interference corpora are split 80/20 per fold as well, so the
+        # lung and environmental clips heard at test time were never used to
+        # build training mixtures. The shuffle is seeded per fold for
+        # reproducibility, and the two slices are disjoint by construction.
         rng = random.Random(args.seed + fold)
         tr_icbhi = sorted(list(icbhi_files))
         tr_env = sorted(list(env_files))
@@ -648,11 +723,13 @@ def main():
                        "folds_done": fold + 1, "per_fold": all_fold_metrics}, f, indent=2)
 
         if args.gcs_bucket:
-            # Upload after every fold, not just at the end -- if a preemptible/spot
-            # job gets killed mid-run, completed folds' raw predictions and the
-            # convergence log are already safe in GCS instead of lost with the container.
+            # Upload after every fold rather than only at the end, so that a
+            # job interrupted mid-run (e.g. a preempted spot instance) still
+            # leaves the completed folds' predictions and logs in the bucket.
             upload_to_gcs(args.gcs_bucket, output_dir, output_prefix.rstrip("/"))
 
+    # Aggregate across folds: mean of the per-fold metrics and a half-width
+    # confidence interval from the across-fold spread.
     final_results = {}
     for lam in lambdas:
         metrics = [fold[lam] for fold in all_fold_metrics]

@@ -1,6 +1,17 @@
-"""Sanity checks for giordano_snr.py, same spirit as test_tang_features.py --
-targeted checks against signals with known expected behavior, run before
-wiring into the CV pipeline."""
+"""
+Behavioural sanity checks for giordano_snr.py, in the same style as
+test_tang_features.py.
+
+Verifies on synthetic signals that cycle-duration estimation recovers a known
+heart period, that a clean synthetic PCG scores a high SNR while broadband
+noise scores much lower, that the score decreases monotonically as more
+RMS-matched noise is mixed in, and that degenerate inputs (silence, a signal
+shorter than one cycle) are handled without raising.
+
+Exits non-zero if any check fails.
+
+Run: python3 test_giordano_snr.py
+"""
 
 import numpy as np
 from giordano_snr import compute_snr_db, _estimate_cycle_duration_samples
@@ -10,12 +21,16 @@ rng = np.random.default_rng(42)
 
 
 def check(name, cond, detail=""):
+    """Report one check and return its outcome, for accumulation by main()."""
     status = "PASS" if cond else "FAIL"
     print(f"[{status}] {name}" + (f" -- {detail}" if detail else ""))
     return cond
 
 
 def make_heartbeat(fs, duration=10, hr_hz=1.2, noise_std=0.02):
+    """Synthesize a crude PCG: two Hanning-windowed bursts per cycle (S1 then
+    S2, 30 ms apart) repeating at `hr_hz`, plus Gaussian noise. Returns the
+    waveform and the true cycle length in samples."""
     t = np.arange(0, duration, 1 / fs)
     hb = np.zeros(len(t))
     period = int(fs / hr_hz)
@@ -51,8 +66,8 @@ def main():
         f"noise={snr_noise:.2f} dB vs clean={snr_clean:.2f} dB",
     )
 
-    # Monotonicity: as we mix in more noise (RMS-scaled, matching the actual
-    # pipeline's mix_rms), SNR should trend downward.
+    # Monotonicity: mixing in progressively more RMS-matched noise, using the
+    # same formula as the CV pipeline's mix_rms, should lower the SNR score.
     heart, _ = make_heartbeat(FS, noise_std=0.02)
     noise_source = rng.normal(0, 1, len(heart))
     rms_h = np.sqrt(np.mean(heart ** 2))
@@ -73,7 +88,7 @@ def main():
         f"snrs={[round(s,2) for s in snrs_by_lambda]}",
     )
 
-    # Edge cases: must not crash
+    # Degenerate inputs must return a value rather than raise.
     try:
         s = compute_snr_db(np.zeros(1000), FS)
         all_ok &= check("all-zero signal doesn't crash", np.isfinite(s) or s == -np.inf, f"got {s}")
@@ -87,7 +102,7 @@ def main():
         all_ok &= check("very short signal doesn't crash", False, str(e))
 
     print()
-    print("ALL CHECKS PASSED" if all_ok else "SOME CHECKS FAILED -- do not proceed until fixed")
+    print("ALL CHECKS PASSED" if all_ok else "SOME CHECKS FAILED")
     return 0 if all_ok else 1
 
 

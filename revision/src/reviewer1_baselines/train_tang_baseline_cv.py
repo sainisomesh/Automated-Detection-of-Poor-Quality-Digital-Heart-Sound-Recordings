@@ -1,30 +1,39 @@
 #!/usr/bin/env python3
 """
-Tang et al. (2021) baseline, evaluated through the EXACT same patient-level
-CV / noise-mixing pipeline as the AST-QA model, for a fair head-to-head
-comparison (Reviewer #1, Comment 1).
+Tang et al. (2021) signal-quality baseline, evaluated under the same
+patient-level cross-validation and noise-mixing protocol as the AST-QA model
+so that the two are directly comparable.
 
-This is deliberately a near-clone of
-  reproducibility/src/train_per_lambda_cv.py
-The data discovery, patient-level fold construction, noise composition
-(lung + 0.5*env, peak-normalized), and RMS mixing formula
-  mixed = heart + lambda * (noise * rms_heart/rms_noise)
-are copied verbatim from that script (same audio pipeline AST-QA was
-evaluated on). The ONLY change: instead of AST mel-spectrograms + a
-frozen transformer + trainable head, each mixed/noise-only waveform is
-run through Tang et al.'s published 10-feature extractor (tang_features.py,
-ported directly from the authors' released MATLAB code) and classified
-with an SVM configured exactly as in their released code:
+The audio pipeline is a deliberate clone of
+`../../../src/train_per_lambda_cv.py`: identical dataset discovery,
+patient-level fold construction, composite noise (lung + 0.5 * environmental,
+peak-normalized), and RMS-matched mixing
+
+    mixed = heart + lambda * (noise * RMS(heart) / RMS(noise))
+
+The functions carrying that shared pipeline are marked below and must stay in
+step with the reference implementation. What differs is the classifier: rather
+than log-Mel spectrograms fed to an AST backbone, every mixed or noise-only
+waveform is reduced to the 10 published Tang et al. features
+(`tang_features.py`) and classified with an SVM.
+
+Classifier configuration was taken from the authors' released MATLAB source,
     fitcsvm(..., 'Standardize', true, 'KernelFunction', 'RBF', 'KernelScale', 'auto')
-  -> sklearn Pipeline(StandardScaler(), SVC(kernel='rbf', gamma='scale', probability=True))
+whose scikit-learn equivalent is
+    Pipeline(StandardScaler(), SVC(kernel='rbf', gamma='scale', probability=True))
+('Standardize', true -> StandardScaler; 'KernelScale', 'auto' -> gamma='scale').
 
-Fold count: 5-fold (not the original Table 2's 10-fold) -- a deliberate,
-documented deviation for this revision's compute budget. See
-PAPER_REVISIONS/README.md and CLAUDE.md Sec 9.4.
+Labels: heart recordings mixed with noise at intensity lambda are the positive
+class (1, acceptable quality); noise-only signals are the negative class (0).
+One negative is synthesized per positive, so the classes are balanced.
+
+Cross-validation uses 5 patient-level folds by default; see ../../README.md
+for the fold-count policy across this package.
 
 Usage:
-    python train_tang_baseline_cv.py --data_dir ../../../data_processed/ \
-        --output_dir ../results/ --n_folds 5 --seed 42
+    python train_tang_baseline_cv.py --data_dir ../../../dataset/ \
+        --output_dir ../../results/reviewer1_baselines/tang_full/ \
+        --n_folds 5 --seed 42
 """
 
 import argparse
@@ -54,7 +63,7 @@ logger = logging.getLogger(__name__)
 TARGET_SR = 16000
 DURATION = 10
 MAX_LENGTH = TARGET_SR * DURATION
-TANG_FS = 1000.0  # matches Tang et al.'s stated preprocessing sampling rate
+TANG_FS = 1000.0  # sampling rate the Tang et al. features are defined at
 
 
 def set_seed(seed):
@@ -62,12 +71,19 @@ def set_seed(seed):
     np.random.seed(seed)
 
 
-# Copied verbatim from reproducibility/src/train_per_lambda_cv.py
-# (same audio pipeline AST-QA is evaluated on -- must stay byte-identical)
+# ── Shared audio pipeline ───────────────────────────────────────────────
+# The three functions below mirror ../../../src/train_per_lambda_cv.py so that
+# this baseline sees exactly the same audio as the AST-QA model. Any change
+# here must be mirrored there, and vice versa.
 def load_audio(path):
-    """Load and preprocess a single audio file (16kHz, DC-removed, peak-
-    normalized, loop-padded/cropped to 10s, clinical 20-1000Hz bandpass) --
-    identical to the AST-QA pipeline's own load_audio."""
+    """Load one recording and apply the shared conditioning pipeline.
+
+    Resamples to 16 kHz mono, removes the DC offset, applies a 20-1000 Hz
+    bandpass (2nd-order high-pass, 5th-order low-pass), peak-normalizes, and
+    forces a uniform 10 s length by truncation or loop padding (`np.tile`).
+
+    Returns None for unreadable, too-short, or effectively silent files.
+    """
     try:
         wav, _ = librosa.load(path, sr=TARGET_SR, mono=True)
     except Exception:
@@ -93,7 +109,12 @@ def load_audio(path):
 
 
 def mix_rms(heart, noise, lam):
-    """RMS-based mixing, identical to train_per_lambda_cv.py's mix_rms."""
+    """Mix `noise` into `heart` at RMS-matched noise intensity `lam`.
+
+    The noise is first rescaled to the heart sound's RMS energy, so lam = 1
+    corresponds to 0 dB SNR and lam = 10 to ten times the cardiac RMS energy.
+    The mixture is rescaled if it would otherwise clip beyond +/-1.0.
+    """
     if lam == 0:
         return heart
     rms_h = np.sqrt(np.mean(heart ** 2))
@@ -109,8 +130,14 @@ def mix_rms(heart, noise, lam):
 
 
 def get_noise(icbhi_files, env_files, rng):
-    """Structured noise: lung + 0.5*env, peak-normalized. Identical formula
-    to train_per_lambda_cv.py's PerLambdaDataset.get_noise."""
+    """Draw one composite noise signal: lung + 0.5 * environmental.
+
+    A respiratory recording (ICBHI 2017) is summed with a half-weighted
+    environmental clip (ESC-50 / UrbanSound8K) and peak-normalized, modelling
+    clinical auscultation where internal physiological interference dominates
+    ambient noise. Retries up to 10 times if either draw fails to load, then
+    returns silence.
+    """
     for _ in range(10):
         lung = load_audio(rng.choice(icbhi_files))
         env = load_audio(rng.choice(env_files))
@@ -121,19 +148,36 @@ def get_noise(icbhi_files, env_files, rng):
                 combined = combined / peak
             return combined
     return np.zeros(MAX_LENGTH)
-# end verbatim block
+# ── End shared audio pipeline ───────────────────────────────────────────
 
 
 def wav_to_tang_features(wav_16k):
-    """Resample the (already mixed/clean) 16kHz waveform to Tang's expected
-    1kHz, run their exact preprocessing, and extract their 10 features."""
+    """Turn a mixed (or clean) 16 kHz waveform into the 10 Tang et al.
+    features: resample to the 1 kHz rate the features are defined at, apply
+    the method's own preprocessing, then extract."""
     wav_1k = librosa.resample(wav_16k, orig_sr=TARGET_SR, target_sr=TANG_FS)
     processed = tang_pre_processing(wav_1k, TANG_FS)
     return tang_extract_features(processed, TANG_FS)
 
 
 def _extract_one(args):
-    """Worker function for multiprocessing.Pool -- must be top-level/picklable."""
+    """Build one training/test sample and return (features, label, filename).
+
+    Top-level (rather than nested) so it stays picklable for
+    multiprocessing.Pool. `args` is a tuple of
+    (kind, heart_path, icbhi_files, env_files, lam, seed_idx, is_train):
+
+    - kind == "mixed": load `heart_path`, mix composite noise in at intensity
+      `lam`, label 1.
+    - kind == "noise": composite noise only, label 0, filename "noise".
+
+    Noise selection for evaluation samples is seeded per sample as
+    `random.Random(42 + seed_idx)`, giving a fixed, reproducible noise draw
+    for each test item; training samples draw from an unseeded generator so
+    that each fold's training set sees varied noise. Returns None if the
+    recording cannot be loaded or feature extraction fails, in which case the
+    sample is dropped from the fold.
+    """
     kind, heart_path, icbhi_files, env_files, lam, seed_idx, is_train = args
     if kind == "mixed":
         h = load_audio(heart_path)
@@ -161,8 +205,20 @@ def _extract_one(args):
 
 
 def build_feature_set(heart_files, icbhi_files, env_files, lam, is_train, n_jobs):
-    """Mirrors PerLambdaDataset: each heart file -> one 'mixed' sample
-    (label=1), plus an equal number of noise-only samples (label=0)."""
+    """Build the balanced feature matrix for one fold and noise level.
+
+    Each heart recording contributes one noise-mixed positive sample, and an
+    equal number of noise-only negatives is synthesized, matching the sample
+    construction of the AST-QA dataset class. `seed_idx` is assigned
+    0..N-1 to the positives and N..2N-1 to the negatives so that no two
+    evaluation samples share a noise draw.
+
+    Returns
+    -------
+    (X, y, filenames)
+        Feature matrix, labels, and the source path per row ("noise" for
+        negatives).
+    """
     tasks = []
     for i, hf in enumerate(heart_files):
         tasks.append(("mixed", hf, icbhi_files, env_files, lam, i, is_train))
@@ -184,6 +240,11 @@ def build_feature_set(heart_files, icbhi_files, env_files, lam, is_train, n_jobs
 
 
 def compute_metrics(y_true, probs, threshold=0.5):
+    """Evaluate one fold: AUROC, AUPRC, accuracy, F1, sensitivity,
+    specificity, and the raw confusion-matrix counts. AUROC/AUPRC are
+    threshold-free; the remaining metrics use the given decision threshold.
+    AUROC falls back to 0.5 (and AUPRC to 0.0) if only one class is present.
+    """
     preds = (probs > threshold).astype(int)
     try:
         auroc = roc_auc_score(y_true, probs)
@@ -211,10 +272,12 @@ def main():
     parser.add_argument("--data_dir", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--n_folds", type=int, default=5,
-                         help="5-fold per this revision's documented deviation (see CLAUDE.md Sec 9.4)")
+                         help="Number of patient-level CV folds (see ../../README.md)")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--lambdas", type=str, default="0,0.25,0.5,1,5,10,25,50,75,100")
-    parser.add_argument("--n_jobs", type=int, default=1)
+    parser.add_argument("--lambdas", type=str, default="0,0.25,0.5,1,5,10,25,50,75,100",
+                         help="Comma-separated noise intensities to sweep")
+    parser.add_argument("--n_jobs", type=int, default=1,
+                         help="Parallel worker processes for feature extraction")
     parser.add_argument("--limit_patients", type=int, default=0,
                          help="If >0, only use this many patients (for smoke-testing)")
     args = parser.parse_args()
@@ -232,6 +295,9 @@ def main():
     if not heart_files:
         raise ValueError(f"No heart audio files found in {args.data_dir}")
 
+    # Group recordings by patient so folds can be split at the patient level:
+    # filenames are {patient_id}_{valve}.wav, e.g. 13918_AV.wav -> 13918.
+    # All recordings from one patient stay on the same side of every split.
     patient_map = {}
     for f in heart_files:
         pid = f.name.split('_')[0]
@@ -248,6 +314,7 @@ def main():
 
     for l_val in lambdas:
         logger.info(f"=== Starting {args.n_folds}-Fold CV for Lambda={l_val} (Tang et al. baseline) ===")
+        # Folds are formed over patient IDs, not files.
         kf = KFold(n_splits=args.n_folds, shuffle=True, random_state=args.seed)
         lambda_metrics = []
 
@@ -255,6 +322,8 @@ def main():
             tr_hearts = [f for i in train_idx for f in patient_map[pids[i]]]
             te_hearts = [f for i in test_idx for f in patient_map[pids[i]]]
 
+            # The noise corpora are also split 80/20 per fold, so evaluation
+            # noise comes from clips never used during training.
             rng = random.Random(args.seed + fold)
             tr_icbhi = sorted(list(icbhi_files))
             tr_env = sorted(list(env_files))
@@ -271,7 +340,9 @@ def main():
             X_train, y_train, _ = build_feature_set(tr_hearts, tr_icbhi, tr_env, l_val, is_train=True, n_jobs=args.n_jobs)
             X_test, y_test, filenames_test = build_feature_set(te_hearts, te_icbhi, te_env, l_val, is_train=False, n_jobs=args.n_jobs)
 
-            # Exact match to fitcsvm(...,'Standardize',true,'KernelFunction','RBF','KernelScale','auto')
+            # scikit-learn equivalent of the authors' released MATLAB call:
+            # fitcsvm(..., 'Standardize', true, 'KernelFunction', 'RBF',
+            #         'KernelScale', 'auto')
             clf = Pipeline([
                 ("scaler", StandardScaler()),
                 ("svm", SVC(kernel="rbf", gamma="scale", probability=True, random_state=args.seed)),
@@ -283,12 +354,17 @@ def main():
             lambda_metrics.append(metrics)
             logger.info(f"  Fold {fold + 1}: AUROC={metrics['auroc']:.4f} F1={metrics['f1']:.4f}")
 
+            # Raw per-sample held-out predictions, saved alongside the
+            # aggregated metrics so every reported number can be recomputed
+            # (and so the significance scripts can pair folds by row).
             preds_dir = os.path.join(args.output_dir, "raw_predictions", f"lambda_{l_val}", f"fold_{fold + 1}")
             os.makedirs(preds_dir, exist_ok=True)
             pd.DataFrame({
                 "filename": filenames_test, "y_true": y_test, "probs": probs,
             }).to_csv(os.path.join(preds_dir, "predictions.csv"), index=False)
 
+        # Fold-level aggregation. The reported half-widths are normal-
+        # approximation 95% intervals (1.96 * SD / sqrt(n_folds)) over folds.
         avg_auroc = float(np.mean([m['auroc'] for m in lambda_metrics]))
         ci_auroc = float(1.96 * np.std([m['auroc'] for m in lambda_metrics]) / np.sqrt(args.n_folds))
         avg_f1 = float(np.mean([m['f1'] for m in lambda_metrics]))
