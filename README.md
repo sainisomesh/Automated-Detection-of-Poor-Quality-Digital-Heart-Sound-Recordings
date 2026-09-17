@@ -34,6 +34,11 @@ Two experiments are included:
        - Noise [0,10]: Trained with random noise λ ~ Uniform[0, 10]
        - Noise 10:   Trained with fixed noise λ = 10
 
+  The revision/ subfolder is a separate, self-contained reproducibility package
+  for the additional experiments run for this paper's major-revision response
+  (baselines vs. prior methods, backbone-swap comparison, backbone fine-tuning
+  ablation, denoise-vs-noise-aware-training comparison). See revision/README.md.
+
 
 REQUIREMENTS
 ------------
@@ -46,7 +51,13 @@ REQUIREMENTS
 
 DATA AVAILABILITY
 -----------------
-  All datasets and pre-generated mixed audio are available on Zenodo:
+  run_all.sh downloads and extracts the raw dataset automatically on first run
+  (it's fetched from Zenodo below) -- no manual setup needed. The pre-mixed
+  per-lambda audio is generated locally from the raw dataset instead of
+  downloaded, using src/generate_mixed_datasets.py.
+
+  Both are also available directly on Zenodo if you'd rather fetch them
+  yourself:
 
     DOI: https://doi.org/10.5281/zenodo.19638493
     Download: https://zenodo.org/records/19638493
