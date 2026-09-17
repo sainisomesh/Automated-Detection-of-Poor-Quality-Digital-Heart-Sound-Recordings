@@ -1,0 +1,678 @@
+{
+  "methodology_note": "PAIRED comparison, AST vs. each backbone, at their matching 3-fold runs (reviewer1_unfreezing_ablation/results/{frozen,full}/ vs. reviewer7_backbone_swap/results/{panns,yamnet,hubert}[_full]/). Verified byte-for-byte (2026-09-16) that both sides share identical per-fold, per-lambda test-file ordering (positives and synthesized negatives), enabling row-position pairing. Distinct from compute_significance_vs_ast.py, which compares against the published frozen 10-fold model and discloses its own unpaired, partial-data limitations.",
+  "bootstrap_iterations": 1000,
+  "n_folds": 3,
+  "seed": 42,
+  "panns_frozen_vs_ast_frozen": {
+    "0.0": {
+      "ast_auroc": 0.99962037345137,
+      "panns_auroc": 0.9997879968642328,
+      "diff": -0.00016762341286280513,
+      "paired_bootstrap_ci_95": [
+        -0.00045281112308250823,
+        4.553906033124274e-05
+      ],
+      "paired_bootstrap_p_value": 0.15,
+      "paired_t_p_value": 0.4443126561682186
+    },
+    "0.25": {
+      "ast_auroc": 0.9990060541338662,
+      "panns_auroc": 0.960602700626084,
+      "diff": 0.038403353507782234,
+      "paired_bootstrap_ci_95": [
+        0.034120882299247576,
+        0.04257305952602168
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.029746980357556622
+    },
+    "0.5": {
+      "ast_auroc": 0.9978366884170623,
+      "panns_auroc": 0.96115264935451,
+      "diff": 0.036684039062552354,
+      "paired_bootstrap_ci_95": [
+        0.03248444876624248,
+        0.04059237099181881
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.010743730691568141
+    },
+    "1.0": {
+      "ast_auroc": 0.9949280173888551,
+      "panns_auroc": 0.9476326266528823,
+      "diff": 0.047295390735972775,
+      "paired_bootstrap_ci_95": [
+        0.042011002019347585,
+        0.052028513657717365
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.001956648684203566
+    },
+    "5.0": {
+      "ast_auroc": 0.9079959366565417,
+      "panns_auroc": 0.7094865356018836,
+      "diff": 0.19850940105465809,
+      "paired_bootstrap_ci_95": [
+        0.18552980748229275,
+        0.20990151026855927
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.0013366761082824511
+    },
+    "10.0": {
+      "ast_auroc": 0.7619255262270669,
+      "panns_auroc": 0.5899601971859058,
+      "diff": 0.17196532904116113,
+      "paired_bootstrap_ci_95": [
+        0.15557661356587826,
+        0.185951548997177
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.0035269155137416406
+    },
+    "25.0": {
+      "ast_auroc": 0.5923928357133625,
+      "panns_auroc": 0.5185564215709842,
+      "diff": 0.07383641414237829,
+      "paired_bootstrap_ci_95": [
+        0.05717772423111579,
+        0.08966872822181694
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.018374771884579814
+    },
+    "50.0": {
+      "ast_auroc": 0.5328635846281834,
+      "panns_auroc": 0.5002080549396981,
+      "diff": 0.032655529688485285,
+      "paired_bootstrap_ci_95": [
+        0.01577606525649666,
+        0.04853046171481791
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.07938648710742291
+    },
+    "75.0": {
+      "ast_auroc": 0.5166934227751341,
+      "panns_auroc": 0.49522008394364614,
+      "diff": 0.021473338831487943,
+      "paired_bootstrap_ci_95": [
+        0.004537379736912035,
+        0.03744743153987847
+      ],
+      "paired_bootstrap_p_value": 0.01,
+      "paired_t_p_value": 0.13654555856900108
+    },
+    "100.0": {
+      "ast_auroc": 0.5100530567583671,
+      "panns_auroc": 0.49313313746949017,
+      "diff": 0.016919919288876928,
+      "paired_bootstrap_ci_95": [
+        -4.322100637016844e-05,
+        0.03310648360724197
+      ],
+      "paired_bootstrap_p_value": 0.052,
+      "paired_t_p_value": 0.1726274869710972
+    }
+  },
+  "yamnet_frozen_vs_ast_frozen": {
+    "0.0": {
+      "ast_auroc": 0.99962037345137,
+      "yamnet_auroc": 0.9986915978089611,
+      "diff": 0.0009287756424088967,
+      "paired_bootstrap_ci_95": [
+        0.0005145796450236578,
+        0.001374224985600292
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.0007271895075361801
+    },
+    "0.25": {
+      "ast_auroc": 0.9990060541338662,
+      "yamnet_auroc": 0.9868037293760483,
+      "diff": 0.012202324757817906,
+      "paired_bootstrap_ci_95": [
+        0.010048893859672609,
+        0.01443357846558716
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.014950576047719943
+    },
+    "0.5": {
+      "ast_auroc": 0.9978366884170623,
+      "yamnet_auroc": 0.9683265715894409,
+      "diff": 0.02951011682762139,
+      "paired_bootstrap_ci_95": [
+        0.02576724347374034,
+        0.034033839875006175
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.012122182567384706
+    },
+    "1.0": {
+      "ast_auroc": 0.9949280173888551,
+      "yamnet_auroc": 0.9292330334270272,
+      "diff": 0.06569498396182782,
+      "paired_bootstrap_ci_95": [
+        0.059790935855354256,
+        0.07236348846791472
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.006128527978262288
+    },
+    "5.0": {
+      "ast_auroc": 0.9079959366565417,
+      "yamnet_auroc": 0.6754598823797406,
+      "diff": 0.23253605427680102,
+      "paired_bootstrap_ci_95": [
+        0.21913331301387684,
+        0.24621191855449823
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.0028283321201004316
+    },
+    "10.0": {
+      "ast_auroc": 0.7619255262270669,
+      "yamnet_auroc": 0.5771238121302377,
+      "diff": 0.18480171409682922,
+      "paired_bootstrap_ci_95": [
+        0.16847294792778442,
+        0.1993338320560607
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.0066002455797807644
+    },
+    "25.0": {
+      "ast_auroc": 0.5923928357133625,
+      "yamnet_auroc": 0.5236164596395907,
+      "diff": 0.06877637607377185,
+      "paired_bootstrap_ci_95": [
+        0.051454467089411995,
+        0.0849198999827986
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.037190521768482025
+    },
+    "50.0": {
+      "ast_auroc": 0.5328635846281834,
+      "yamnet_auroc": 0.5094177470313814,
+      "diff": 0.023445837596801966,
+      "paired_bootstrap_ci_95": [
+        0.0059204764806294365,
+        0.0407029561609859
+      ],
+      "paired_bootstrap_p_value": 0.01,
+      "paired_t_p_value": 0.2039132785429839
+    },
+    "75.0": {
+      "ast_auroc": 0.5166934227751341,
+      "yamnet_auroc": 0.5053100238501029,
+      "diff": 0.011383398925031152,
+      "paired_bootstrap_ci_95": [
+        -0.006260405638241864,
+        0.02906226908769721
+      ],
+      "paired_bootstrap_p_value": 0.196,
+      "paired_t_p_value": 0.4289155803660625
+    },
+    "100.0": {
+      "ast_auroc": 0.5100530567583671,
+      "yamnet_auroc": 0.5032791517555628,
+      "diff": 0.006773905002804281,
+      "paired_bootstrap_ci_95": [
+        -0.010800443073801503,
+        0.024553489327300247
+      ],
+      "paired_bootstrap_p_value": 0.47,
+      "paired_t_p_value": 0.5903481185404597
+    }
+  },
+  "hubert_frozen_vs_ast_frozen": {
+    "0.0": {
+      "ast_auroc": 0.99962037345137,
+      "hubert_auroc": 0.9991455903797555,
+      "diff": 0.00047478307161452626,
+      "paired_bootstrap_ci_95": [
+        -1.6650775251472733e-05,
+        0.0011181582423869156
+      ],
+      "paired_bootstrap_p_value": 0.066,
+      "paired_t_p_value": 0.5059726759293717
+    },
+    "0.25": {
+      "ast_auroc": 0.9990060541338662,
+      "hubert_auroc": 0.9985310711535899,
+      "diff": 0.00047498298027637276,
+      "paired_bootstrap_ci_95": [
+        -7.529154131161731e-05,
+        0.0011062683324344095
+      ],
+      "paired_bootstrap_p_value": 0.082,
+      "paired_t_p_value": 0.507992548361798
+    },
+    "0.5": {
+      "ast_auroc": 0.9978366884170623,
+      "hubert_auroc": 0.9965779635284638,
+      "diff": 0.0012587248885984614,
+      "paired_bootstrap_ci_95": [
+        0.0003226688179726045,
+        0.0022251774430576744
+      ],
+      "paired_bootstrap_p_value": 0.01,
+      "paired_t_p_value": 0.28956496832998907
+    },
+    "1.0": {
+      "ast_auroc": 0.9949280173888551,
+      "hubert_auroc": 0.9844364110038124,
+      "diff": 0.010491606385042651,
+      "paired_bootstrap_ci_95": [
+        0.008032170254417537,
+        0.013072907964190935
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.0736519393839593
+    },
+    "5.0": {
+      "ast_auroc": 0.9079959366565417,
+      "hubert_auroc": 0.788262942661498,
+      "diff": 0.11973299399504367,
+      "paired_bootstrap_ci_95": [
+        0.10872686677775098,
+        0.1305222158601579
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.005708861211969756
+    },
+    "10.0": {
+      "ast_auroc": 0.7619255262270669,
+      "hubert_auroc": 0.6569342467426633,
+      "diff": 0.10499127948440357,
+      "paired_bootstrap_ci_95": [
+        0.09032342049587674,
+        0.11911236233388228
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.006494621150942002
+    },
+    "25.0": {
+      "ast_auroc": 0.5923928357133625,
+      "hubert_auroc": 0.5533215373895667,
+      "diff": 0.039071298323795856,
+      "paired_bootstrap_ci_95": [
+        0.022635251555494517,
+        0.05480720043466236
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.01716120597817496
+    },
+    "50.0": {
+      "ast_auroc": 0.5328635846281834,
+      "hubert_auroc": 0.5230344755481221,
+      "diff": 0.009829109080061293,
+      "paired_bootstrap_ci_95": [
+        -0.006733827321186006,
+        0.025828888722492154
+      ],
+      "paired_bootstrap_p_value": 0.234,
+      "paired_t_p_value": 0.14270262762141314
+    },
+    "75.0": {
+      "ast_auroc": 0.5166934227751341,
+      "hubert_auroc": 0.5149912005204822,
+      "diff": 0.0017022222546518861,
+      "paired_bootstrap_ci_95": [
+        -0.014427453727114292,
+        0.01756124486702154
+      ],
+      "paired_bootstrap_p_value": 0.862,
+      "paired_t_p_value": 0.5768583570756649
+    },
+    "100.0": {
+      "ast_auroc": 0.5100530567583671,
+      "hubert_auroc": 0.5115819582032969,
+      "diff": -0.0015289014449297866,
+      "paired_bootstrap_ci_95": [
+        -0.017721141716661098,
+        0.014416093092795547
+      ],
+      "paired_bootstrap_p_value": 0.828,
+      "paired_t_p_value": 0.9227132028203835
+    }
+  },
+  "panns_full_vs_ast_full": {
+    "0.0": {
+      "ast_auroc": 0.999986506165333,
+      "panns_auroc": 0.9998236805603519,
+      "diff": 0.00016282560498115384,
+      "paired_bootstrap_ci_95": [
+        2.1790180091943447e-05,
+        0.0004261628339771867
+      ],
+      "paired_bootstrap_p_value": 0.004,
+      "paired_t_p_value": 0.39900713977008884
+    },
+    "0.25": {
+      "ast_auroc": 0.999578592541068,
+      "panns_auroc": 0.999543408616603,
+      "diff": 3.518392446499874e-05,
+      "paired_bootstrap_ci_95": [
+        -0.0002660585128743759,
+        0.0003396640533408572
+      ],
+      "paired_bootstrap_p_value": 0.884,
+      "paired_t_p_value": 0.6926974969657567
+    },
+    "0.5": {
+      "ast_auroc": 0.9990373398394273,
+      "panns_auroc": 0.9990654270064008,
+      "diff": -2.8087166973445044e-05,
+      "paired_bootstrap_ci_95": [
+        -0.00044753841822753603,
+        0.00036983042960586057
+      ],
+      "paired_bootstrap_p_value": 0.892,
+      "paired_t_p_value": 0.8705477943443705
+    },
+    "1.0": {
+      "ast_auroc": 0.9974302741077602,
+      "panns_auroc": 0.9974384703628911,
+      "diff": -8.19625513093225e-06,
+      "paired_bootstrap_ci_95": [
+        -0.0008223409162810696,
+        0.0007796034156166836
+      ],
+      "paired_bootstrap_p_value": 0.958,
+      "paired_t_p_value": 0.8361813991893667
+    },
+    "5.0": {
+      "ast_auroc": 0.9605756130024191,
+      "panns_auroc": 0.9383180824681204,
+      "diff": 0.022257530534298686,
+      "paired_bootstrap_ci_95": [
+        0.016990834306442524,
+        0.027484716048398503
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.05397041927331078
+    },
+    "10.0": {
+      "ast_auroc": 0.8794398839170383,
+      "panns_auroc": 0.8395508092352605,
+      "diff": 0.039889074681777825,
+      "paired_bootstrap_ci_95": [
+        0.030437013785984745,
+        0.04900756700565638
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.031160827241363227
+    },
+    "25.0": {
+      "ast_auroc": 0.7004385696175418,
+      "panns_auroc": 0.6581918221564567,
+      "diff": 0.04224674746108514,
+      "paired_bootstrap_ci_95": [
+        0.02853042403736338,
+        0.05568387585475211
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.024529673117166938
+    },
+    "50.0": {
+      "ast_auroc": 0.5862926229005967,
+      "panns_auroc": 0.5615550754860105,
+      "diff": 0.024737547414586225,
+      "paired_bootstrap_ci_95": [
+        0.00983283769424699,
+        0.03891398706950226
+      ],
+      "paired_bootstrap_p_value": 0.002,
+      "paired_t_p_value": 0.007422428551730041
+    },
+    "75.0": {
+      "ast_auroc": 0.5444550384929127,
+      "panns_auroc": 0.5295937286253911,
+      "diff": 0.014861309867521544,
+      "paired_bootstrap_ci_95": [
+        0.00012346510949982382,
+        0.029367447021863502
+      ],
+      "paired_bootstrap_p_value": 0.05,
+      "paired_t_p_value": 0.02343588038313089
+    },
+    "100.0": {
+      "ast_auroc": 0.5279505793802811,
+      "panns_auroc": 0.5161033923600307,
+      "diff": 0.01184718702025045,
+      "paired_bootstrap_ci_95": [
+        -0.0031493888136468334,
+        0.025884286863969295
+      ],
+      "paired_bootstrap_p_value": 0.124,
+      "paired_t_p_value": 0.02842215304347375
+    }
+  },
+  "yamnet_full_vs_ast_full": {
+    "0.0": {
+      "ast_auroc": 0.999986506165333,
+      "yamnet_auroc": 0.997758774016152,
+      "diff": 0.0022277321491810387,
+      "paired_bootstrap_ci_95": [
+        0.0013215000647575775,
+        0.0033834260003771707
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.2226043338119233
+    },
+    "0.25": {
+      "ast_auroc": 0.999578592541068,
+      "yamnet_auroc": 0.9890889352654773,
+      "diff": 0.010489657275590702,
+      "paired_bootstrap_ci_95": [
+        0.008372540421140068,
+        0.01279303776696431
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.14506970309902378
+    },
+    "0.5": {
+      "ast_auroc": 0.9990373398394273,
+      "yamnet_auroc": 0.9759170534982566,
+      "diff": 0.023120286341170693,
+      "paired_bootstrap_ci_95": [
+        0.019921409981394633,
+        0.026441075128494078
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.07071200883123828
+    },
+    "1.0": {
+      "ast_auroc": 0.9974302741077602,
+      "yamnet_auroc": 0.9390403024857943,
+      "diff": 0.05838997162196591,
+      "paired_bootstrap_ci_95": [
+        0.05207492018792554,
+        0.06481673400239338
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.012686037332978505
+    },
+    "5.0": {
+      "ast_auroc": 0.9605756130024191,
+      "yamnet_auroc": 0.7304075268010046,
+      "diff": 0.2301680862014145,
+      "paired_bootstrap_ci_95": [
+        0.2186360139112382,
+        0.24414380353551077
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.011507564646982854
+    },
+    "10.0": {
+      "ast_auroc": 0.8794398839170383,
+      "yamnet_auroc": 0.6227660581880139,
+      "diff": 0.2566738257290244,
+      "paired_bootstrap_ci_95": [
+        0.24217931826387515,
+        0.2727255054650632
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.004367664389555777
+    },
+    "25.0": {
+      "ast_auroc": 0.7004385696175418,
+      "yamnet_auroc": 0.534313422197398,
+      "diff": 0.16612514742014384,
+      "paired_bootstrap_ci_95": [
+        0.1467409074452031,
+        0.18616064391185258
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.0001777373638047043
+    },
+    "50.0": {
+      "ast_auroc": 0.5862926229005967,
+      "yamnet_auroc": 0.5092914047571664,
+      "diff": 0.0770012181434303,
+      "paired_bootstrap_ci_95": [
+        0.05504075012169835,
+        0.09854231019525525
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.011431265712795308
+    },
+    "75.0": {
+      "ast_auroc": 0.5444550384929127,
+      "yamnet_auroc": 0.5037357931161253,
+      "diff": 0.040719245376787394,
+      "paired_bootstrap_ci_95": [
+        0.019915239323583658,
+        0.06336163117323244
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.04874313421382431
+    },
+    "100.0": {
+      "ast_auroc": 0.5279505793802811,
+      "yamnet_auroc": 0.5013733725061019,
+      "diff": 0.026577206874179193,
+      "paired_bootstrap_ci_95": [
+        0.0059796219018372326,
+        0.049334583266330834
+      ],
+      "paired_bootstrap_p_value": 0.01,
+      "paired_t_p_value": 0.09259052082682194
+    }
+  },
+  "hubert_full_vs_ast_full": {
+    "0.0": {
+      "ast_auroc": 0.999986506165333,
+      "hubert_auroc": 0.9984806941708334,
+      "diff": 0.0015058119944996173,
+      "paired_bootstrap_ci_95": [
+        0.000861158171783144,
+        0.0022978305847554917
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.34302389672698463
+    },
+    "0.25": {
+      "ast_auroc": 0.999578592541068,
+      "hubert_auroc": 0.9982370055121814,
+      "diff": 0.0013415870288865372,
+      "paired_bootstrap_ci_95": [
+        0.0004861711335377217,
+        0.002332058914962243
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.380081959301488
+    },
+    "0.5": {
+      "ast_auroc": 0.9990373398394273,
+      "hubert_auroc": 0.9976356302805249,
+      "diff": 0.0014017095589023976,
+      "paired_bootstrap_ci_95": [
+        0.0005710092071896433,
+        0.002340042727130248
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.3221283805091746
+    },
+    "1.0": {
+      "ast_auroc": 0.9974302741077602,
+      "hubert_auroc": 0.9950050821779528,
+      "diff": 0.002425191929807391,
+      "paired_bootstrap_ci_95": [
+        0.0012714115832404087,
+        0.003814946186458201
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.27340134953724127
+    },
+    "5.0": {
+      "ast_auroc": 0.9605756130024191,
+      "hubert_auroc": 0.946655123274176,
+      "diff": 0.013920489728243113,
+      "paired_bootstrap_ci_95": [
+        0.008493946941097971,
+        0.019579125693798983
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.07789572716343739
+    },
+    "10.0": {
+      "ast_auroc": 0.8794398839170383,
+      "hubert_auroc": 0.8645132039171303,
+      "diff": 0.014926679999908044,
+      "paired_bootstrap_ci_95": [
+        0.005318641379710951,
+        0.024702168565736773
+      ],
+      "paired_bootstrap_p_value": 0.0,
+      "paired_t_p_value": 0.32620390719513603
+    },
+    "25.0": {
+      "ast_auroc": 0.7004385696175418,
+      "hubert_auroc": 0.6883455449205258,
+      "diff": 0.012093024697016008,
+      "paired_bootstrap_ci_95": [
+        -0.0012522061749845959,
+        0.027183380342049177
+      ],
+      "paired_bootstrap_p_value": 0.088,
+      "paired_t_p_value": 0.5214384037631622
+    },
+    "50.0": {
+      "ast_auroc": 0.5862926229005967,
+      "hubert_auroc": 0.5810703089758289,
+      "diff": 0.005222313924767796,
+      "paired_bootstrap_ci_95": [
+        -0.010260199249554531,
+        0.02142225924753793
+      ],
+      "paired_bootstrap_p_value": 0.482,
+      "paired_t_p_value": 0.7983930997700885
+    },
+    "75.0": {
+      "ast_auroc": 0.5444550384929127,
+      "hubert_auroc": 0.5448243197682979,
+      "diff": -0.0003692812753852692,
+      "paired_bootstrap_ci_95": [
+        -0.015668424335674114,
+        0.015422565912587078
+      ],
+      "paired_bootstrap_p_value": 0.992,
+      "paired_t_p_value": 0.8525984015197167
+    },
+    "100.0": {
+      "ast_auroc": 0.5279505793802811,
+      "hubert_auroc": 0.527414924121169,
+      "diff": 0.0005356552591121444,
+      "paired_bootstrap_ci_95": [
+        -0.014985470917547166,
+        0.015717390422085552
+      ],
+      "paired_bootstrap_p_value": 0.916,
+      "paired_t_p_value": 0.5968285613724896
+    }
+  }
+}

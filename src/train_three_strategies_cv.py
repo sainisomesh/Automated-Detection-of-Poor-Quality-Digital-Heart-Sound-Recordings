@@ -167,17 +167,23 @@ class ThreeStrategyDataset(Dataset):
         elif s_type == 'mixed':
             h = load_audio(path)
             n = self.get_noise()
-            if self.strategy == 'noise_0_10':
-                lam = random.uniform(0, 10)
-            elif self.strategy == 'noise_10':
-                lam = 10.0
+            if h is None or n is None:
+                wav = np.zeros(MAX_LENGTH)
             else:
-                lam = 0.0
-            wav = mix_rms(h, n, lam)
+                if self.strategy == 'noise_0_10':
+                    lam = random.uniform(0, 10)
+                elif self.strategy == 'noise_10':
+                    lam = 10.0
+                else:
+                    lam = 0.0
+                wav = mix_rms(h, n, lam)
         elif s_type == 'eval':
             h = load_audio(path)
             n = self.get_noise(idx)
-            wav = mix_rms(h, n, self.lambda_val)
+            if h is None or n is None:
+                wav = np.zeros(MAX_LENGTH)
+            else:
+                wav = mix_rms(h, n, self.lambda_val)
 
         if wav is None:
             wav = np.zeros(MAX_LENGTH)

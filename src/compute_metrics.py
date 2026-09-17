@@ -53,7 +53,8 @@ def compute_all_metrics(y_true, y_probs, threshold=0.5):
 def aggregate_mean_ci(fold_metrics, n_folds):
     """Aggregate fold-level metrics into mean ± 95% CI."""
     df = pd.DataFrame(fold_metrics)
-    results = {}
+    means = {}
+    cis = {}
     for col in df.columns:
         mean = df[col].mean()
         std = df[col].std()
@@ -61,8 +62,9 @@ def aggregate_mean_ci(fold_metrics, n_folds):
             ci = stats.t.ppf(0.975, n_folds - 1) * (std / np.sqrt(n_folds))
         else:
             ci = 0.0
-        results[col] = {"mean": mean, "ci": ci}
-    return results
+        means[col] = mean
+        cis[col] = ci
+    return {"mean": means, "ci": cis}
 
 
 def compute_per_lambda(results_dir):
@@ -143,8 +145,8 @@ def print_per_lambda_table(results):
         m = results[l_val]
         line = f"{l_val:>8}"
         for metric in ["auroc", "auprc", "f1", "accuracy", "sensitivity", "specificity"]:
-            mean = m[metric]["mean"]
-            ci = m[metric]["ci"]
+            mean = m["mean"][metric]
+            ci = m["ci"][metric]
             line += f" {mean:.4f} ± {ci:.4f}"
         print(line)
 
@@ -166,8 +168,8 @@ def print_three_strategy_table(results):
         for strategy in ['clean', 'noise_0_10', 'noise_10']:
             if l_val in results.get(strategy, {}):
                 m = results[strategy][l_val]
-                mean = m["auroc"]["mean"]
-                ci = m["auroc"]["ci"]
+                mean = m["mean"]["auroc"]
+                ci = m["ci"]["auroc"]
                 line += f" {mean:.4f} ± {ci:.4f}"
             else:
                 line += f" {'N/A':>18}"

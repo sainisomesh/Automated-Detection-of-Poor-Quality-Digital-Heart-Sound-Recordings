@@ -1,0 +1,23 @@
+{
+  "unfreeze_mode": "full",
+  "lambda_val": 0.0,
+  "n_folds": 5,
+  "results": {
+    "mean": {
+      "auroc": 1.0,
+      "auprc": 1.0,
+      "f1": 0.9998431999999999,
+      "accuracy": 0.9998431999999999,
+      "sensitivity": 0.9996866000000001,
+      "specificity": 1.0
+    },
+    "ci": {
+      "auroc": 0.0,
+      "auprc": 0.0,
+      "f1": 0.0002748825197556246,
+      "accuracy": 0.0002748825197556246,
+      "sensitivity": 0.0005494144240523671,
+      "specificity": 0.0
+    }
+  }
+}

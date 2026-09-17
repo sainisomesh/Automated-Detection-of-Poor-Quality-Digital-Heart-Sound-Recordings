@@ -1,0 +1,33 @@
+# Consolidated dependencies for the major-revision reproducibility package
+# (reviewer1_baselines, reviewer1_unfreezing_ablation, reviewer7_backbone_swap,
+# reviewer7_denoiser_benchmark). Unlike each experiment's own
+# PAPER_REVISIONS/*/requirements.txt (which omit torch/torchaudio because
+# those come from the shared Vertex AI Docker base image), this file lists
+# them explicitly since there's no such base image for local reproduction.
+#
+# Versions mirror what was actually verified in PAPER_REVISIONS at the time
+# each experiment's results here were produced -- see each subfolder's
+# README.md in PAPER_REVISIONS/ for the full verification history (e.g. the
+# transformers==4.57.3 pin exists because an earlier unpinned build silently
+# resolved to 5.17.0 and changed HubertModel's behavior).
+
+torch>=2.5.0
+torchaudio>=2.5.0
+tensorflow           # LU-Net (reviewer7_denoiser_benchmark) only -- Keras/TF model, not PyTorch
+tf-keras             # legacy Keras-2 compat, needed to load LU-Net's pre-Keras-3 .h5 checkpoint
+transformers==4.57.3
+huggingface_hub==0.36.0
+safetensors==0.7.0
+librosa==0.11.0
+numpy<2.0.0
+pandas
+scikit-learn
+scipy
+soundfile
+tqdm
+requests
+PyWavelets
+scikit-image
+panns_inference==0.1.1
+torch-vggish-yamnet==0.2.1
+torchlibrosa==0.1.0

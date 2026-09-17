@@ -36,25 +36,8 @@ echo "  AST Heart Quality — Reproducibility Suite"
 echo "============================================"
 echo ""
 
-# ── Step 0: Check dataset ──────────────────────────────────────────
-if [ ! -d "dataset/PhysioNet2022" ]; then
-    echo "ERROR: Dataset not found!"
-    echo ""
-    echo "Please download the dataset from Zenodo and extract it:"
-    echo "  1. Download ast-heart-quality-dataset.zip from [ZENODO_LINK]"
-    echo "  2. Unzip into this directory:"
-    echo "     unzip ast-heart-quality-dataset.zip -d dataset/"
-    echo ""
-    echo "Expected structure:"
-    echo "  dataset/"
-    echo "    PhysioNet2022/training_data/*.wav  (3,163 files)"
-    echo "    ICBHI2017/*.wav                    (174 files)"
-    echo "    ESC-50/audio/*.wav                 (2,000 files)"
-    echo "    UrbanSound8K/*.wav                 (8,732 files)"
-    exit 1
-fi
-
-echo "✓ Dataset found"
+# ── Step 0: Dataset (auto-downloads from Zenodo if missing) ────────
+bash "$SCRIPT_DIR/download_data.sh" "$SCRIPT_DIR/dataset"
 echo "  PhysioNet2022: $(find dataset/PhysioNet2022 -name '*.wav' | wc -l | tr -d ' ') files"
 echo "  ICBHI2017:     $(find dataset/ICBHI2017 -name '*.wav' | wc -l | tr -d ' ') files"
 echo "  ESC-50:        $(find dataset/ESC-50 -name '*.wav' | wc -l | tr -d ' ') files"

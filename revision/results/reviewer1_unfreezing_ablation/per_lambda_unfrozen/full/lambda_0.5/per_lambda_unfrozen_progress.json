@@ -1,0 +1,47 @@
+{
+  "unfreeze_mode": "full",
+  "lambda_val": 0.5,
+  "folds_done": 5,
+  "per_fold": [
+    {
+      "auroc": 0.999955,
+      "auprc": 0.999954,
+      "f1": 0.996047,
+      "accuracy": 0.996032,
+      "sensitivity": 1.0,
+      "specificity": 0.992063
+    },
+    {
+      "auroc": 0.999329,
+      "auprc": 0.999476,
+      "f1": 0.99305,
+      "accuracy": 0.993034,
+      "sensitivity": 0.995356,
+      "specificity": 0.990712
+    },
+    {
+      "auroc": 1.0,
+      "auprc": 1.0,
+      "f1": 0.991763,
+      "accuracy": 0.99183,
+      "sensitivity": 0.98366,
+      "specificity": 1.0
+    },
+    {
+      "auroc": 1.0,
+      "auprc": 1.0,
+      "f1": 0.999214,
+      "accuracy": 0.999215,
+      "sensitivity": 0.99843,
+      "specificity": 1.0
+    },
+    {
+      "auroc": 0.999961,
+      "auprc": 0.999961,
+      "f1": 0.981538,
+      "accuracy": 0.981191,
+      "sensitivity": 1.0,
+      "specificity": 0.962382
+    }
+  ]
+}

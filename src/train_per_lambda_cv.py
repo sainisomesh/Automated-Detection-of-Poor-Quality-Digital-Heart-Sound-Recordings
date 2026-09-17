@@ -308,8 +308,8 @@ def main():
         ci_f1 = 1.96 * np.std([m['f1'] for m in lambda_metrics]) / np.sqrt(args.n_folds)
 
         final_results[l_val] = {
-            "auroc": f"{avg_auroc:.4f} \u00b1 {ci_auroc:.4f}",
-            "f1": f"{avg_f1:.4f} \u00b1 {ci_f1:.4f}"
+            "mean": {"auroc": avg_auroc, "f1": avg_f1},
+            "ci": {"auroc": ci_auroc, "f1": ci_f1}
         }
 
         # Save progress after each lambda
