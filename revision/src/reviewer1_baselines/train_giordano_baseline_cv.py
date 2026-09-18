@@ -128,18 +128,18 @@ def _score_one(args):
     training samples draw unseeded. Returns None if the recording cannot be
     loaded or scored.
     """
-    kind, heart_path, icbhi_files, env_files, lam, seed_idx, is_train = args
+    kind, heart_path, icbhi_files, env_files, lam, seed_idx, is_train, train_noise_seed = args
     if kind == "mixed":
         h = load_audio(heart_path)
         if h is None:
             return None
-        rng = random.Random() if is_train else random.Random(42 + seed_idx)
+        rng = random.Random(train_noise_seed + seed_idx) if is_train else random.Random(42 + seed_idx)
         n = get_noise(icbhi_files, env_files, rng)
         wav = mix_rms(h, n, lam)
         label = 1
         filename = str(heart_path)
     else:
-        rng = random.Random() if is_train else random.Random(42 + seed_idx)
+        rng = random.Random(train_noise_seed + seed_idx) if is_train else random.Random(42 + seed_idx)
         wav = get_noise(icbhi_files, env_files, rng)
         label = 0
         filename = "noise"
@@ -155,7 +155,7 @@ def _score_one(args):
     return score, label, filename
 
 
-def build_score_set(heart_files, icbhi_files, env_files, lam, is_train, n_jobs):
+def build_score_set(heart_files, icbhi_files, env_files, lam, is_train, n_jobs, train_noise_seed=0):
     """Score one fold's samples: one noise-mixed positive per heart recording
     plus an equal number of noise-only negatives. `seed_idx` runs 0..N-1 over
     the positives and N..2N-1 over the negatives so no two evaluation samples
@@ -163,9 +163,10 @@ def build_score_set(heart_files, icbhi_files, env_files, lam, is_train, n_jobs):
     """
     tasks = []
     for i, hf in enumerate(heart_files):
-        tasks.append(("mixed", hf, icbhi_files, env_files, lam, i, is_train))
+        tasks.append(("mixed", hf, icbhi_files, env_files, lam, i, is_train, train_noise_seed))
     for i in range(len(heart_files)):
-        tasks.append(("noise", None, icbhi_files, env_files, lam, len(heart_files) + i, is_train))
+        tasks.append(("noise", None, icbhi_files, env_files, lam, len(heart_files) + i, is_train,
+                       train_noise_seed))
 
     if n_jobs > 1:
         with Pool(n_jobs) as pool:
@@ -325,7 +326,8 @@ def main():
 
             logger.info(f"  Fold {fold + 1}: {len(tr_hearts)} train / {len(te_hearts)} test hearts")
 
-            train_scores, train_labels, _ = build_score_set(tr_hearts, tr_icbhi, tr_env, l_val, is_train=True, n_jobs=args.n_jobs)
+            train_scores, train_labels, _ = build_score_set(tr_hearts, tr_icbhi, tr_env, l_val, is_train=True, n_jobs=args.n_jobs,
+                                            train_noise_seed=1_000_000 + args.seed * 100_000 + fold * 10_000)
             test_scores, test_labels, test_filenames = build_score_set(te_hearts, te_icbhi, te_env, l_val, is_train=False, n_jobs=args.n_jobs)
 
             # Threshold fitted on the training fold only, then frozen.
