@@ -10,6 +10,9 @@
 #   4. Runs Three Training Strategies 10-Fold CV
 #   5. Computes metrics from raw predictions
 #   6. Generates all paper figures
+#   7. (Optional) Hands off to revision/run_all.sh for the four revision
+#      experiments (baselines, backbone ablation, backbone swap, denoiser
+#      benchmark) -- a separate interactive script, one prompt per experiment.
 #
 # Usage:
 #   chmod +x run_all.sh
@@ -111,6 +114,20 @@ python visualize_results.py \
 cd ..
 echo ""
 
+# ── Step 7: Revision experiments (optional) ───────────────────────
+echo "── Step 7: Revision experiments ──"
+echo "Reproduces the four additional experiments from the revised manuscript"
+echo "(published baselines, backbone adaptation ablation, backbone swap,"
+echo "denoise-then-classify) via the separate revision/run_all.sh, which prompts"
+echo "once per experiment. See revision/README.md for details."
+read -p "Continue into the revision experiments now? [y/N]: " run_revision
+if [[ "$run_revision" =~ ^[Yy]$ ]]; then
+    bash "$SCRIPT_DIR/revision/run_all.sh"
+else
+    echo "Skipping (run revision/run_all.sh directly whenever you're ready)"
+fi
+echo ""
+
 # ── Done ──────────────────────────────────────────────────────────
 echo "============================================"
 echo "  ✅ ALL EXPERIMENTS COMPLETE"
@@ -120,6 +137,7 @@ echo "Results saved to:"
 echo "  results/per_lambda_cv/          Per-lambda predictions + metrics"
 echo "  results/three_strategies_cv/    Three-strategy predictions + metrics"
 echo "  results/figures/                Paper figures (PNG + CSV)"
+echo "  revision/results/               Revision experiments, if Step 7 ran"
 echo ""
 echo "To verify against reference results, compare:"
 echo "  results/per_lambda_cv/per_lambda_progress.json"

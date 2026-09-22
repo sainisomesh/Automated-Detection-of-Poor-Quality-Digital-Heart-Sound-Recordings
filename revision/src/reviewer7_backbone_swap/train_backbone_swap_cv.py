@@ -47,7 +47,7 @@ Usage:
     python train_backbone_swap_cv.py --backbone panns --unfreeze_mode frozen \
         --data_dir ../../../dataset/ \
         --output_dir ../../results/reviewer7_backbone_swap/panns/ \
-        --n_folds 3 --epochs 5 --seed 42
+        --n_folds 5 --epochs 5 --seed 42
 """
 
 import argparse
@@ -340,6 +340,16 @@ def train_model(backbone_name, unfreeze_mode, train_loader, fold, device, epochs
 
     A fresh BackboneQAHead is built per fold so that no information leaks
     between folds. Loss is BCEWithLogits on the balanced usable/noise labels.
+
+    Gradients are norm-clipped (max_norm=1.0) whenever the backbone is being
+    fine-tuned. This is not needed for correctness in general -- AST, HuBERT
+    and PANNs all fine-tune stably without it -- but one fold of YAMNet's
+    5-fold full-unfreeze run collapsed to a degenerate all-negative classifier
+    (specificity 1.0, sensitivity near 0 at every lambda) while its other four
+    folds and every other backbone converged normally, which clipping guards
+    against without changing behavior on runs that were already stable.
+    Frozen-mode training never backpropagates into the backbone, so it is
+    unaffected either way.
     """
     logger.info(f"  --> [Train] backbone={backbone_name} mode={unfreeze_mode}, fold={fold}")
     model = BackboneQAHead(backbone_name, freeze_backbone=(unfreeze_mode == "frozen")).to(device)
@@ -356,6 +366,8 @@ def train_model(backbone_name, unfreeze_mode, train_loader, fold, device, epochs
             loss = criterion(logits, labels)
             optimizer.zero_grad()
             loss.backward()
+            if unfreeze_mode != "frozen":
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             epoch_loss += loss.item()
         logger.info(f"  {backbone_name} | Fold {fold} | Epoch {epoch + 1}/{epochs} | Loss: {epoch_loss / len(train_loader):.4f}")

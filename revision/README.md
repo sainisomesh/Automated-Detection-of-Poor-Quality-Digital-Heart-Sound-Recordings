@@ -16,8 +16,8 @@ and verified without rerunning anything.
 | Experiment | Directory | Folds | What it measures |
 |---|---|---|---|
 | Published baselines | `reviewer1_baselines` | 5 | AST-QA against two prior PCG quality-assessment methods: Tang et al. (2021), an SVM over ten hand-crafted features, and Giordano et al. (2021), an SNR-threshold method. |
-| Backbone adaptation ablation | `reviewer1_unfreezing_ablation` | 3 and 5 | Frozen backbone vs. full fine-tuning vs. unfreezing only the top K transformer layers, plus the per-lambda matched benchmark for the fully fine-tuned model. |
-| Backbone swap | `reviewer7_backbone_swap` | 3 | PANNs CNN14, YAMNet and HuBERT substituted for the AST encoder, each evaluated frozen and fully fine-tuned, to test whether the advantage is architectural. |
+| Backbone adaptation ablation | `reviewer1_unfreezing_ablation` | 5 | Frozen backbone vs. full fine-tuning vs. unfreezing only the top K transformer layers, plus the per-lambda matched benchmark for the fully fine-tuned model. |
+| Backbone swap | `reviewer7_backbone_swap` | 5 | PANNs CNN14, YAMNet and HuBERT substituted for the AST encoder, each evaluated frozen and fully fine-tuned, to test whether the advantage is architectural. |
 | Denoise-then-classify | `reviewer7_denoiser_benchmark` | 5 and 10 | A clean-only classifier evaluated on corrupted audio with and without three denoisers, compared against noise-aware training. |
 
 Every experiment evaluates across the same ten noise-intensity levels used throughout the
@@ -32,11 +32,14 @@ retains the frozen-backbone results alongside it for comparison. Both are includ
 - `reviewer1_unfreezing_ablation`: `{frozen,topk2,topk4}_5fold/` and `full_5fold_variable/`
   are the ablation itself. `full_5fold_clean/` and `full_5fold_fixed10/` are the other two
   training strategies under the fine-tuned backbone, and `per_lambda_unfrozen/` is the
-  per-lambda matched benchmark. The `*_3fold/` directories are the same four conditions at
-  3-fold, and supply the AST reference values for the backbone-swap comparison so that all
-  four architectures there are compared at an identical fold count.
+  per-lambda matched benchmark. `frozen_5fold/` and `full_5fold_variable/` also supply the
+  AST reference values for the backbone-swap comparison below, since both experiments use
+  the same fold construction (seed 42, `KFold(n_splits=5, ...)` over the same sorted patient
+  list) and so evaluate the same held-out patients fold for fold.
 - `reviewer7_backbone_swap`: `{panns,yamnet,hubert}/` are frozen, `*_full/` are fully
-  fine-tuned.
+  fine-tuned. `compute_significance_full_paired.py` pairs each against the matching AST
+  condition above; `compute_significance_vs_ast.py` is a separate, unpaired comparison
+  against the originally published frozen 10-fold model.
 - `reviewer7_denoiser_benchmark`: `*_full_5fold/` use the fine-tuned backbone,
   `*_10fold/` use the frozen backbone.
 - `reviewer1_baselines`: `compute_significance_paired.py` compares the baselines against
@@ -51,7 +54,6 @@ revision/
 ├── requirements.txt
 ├── fold_assignments/
 │   ├── patient_folds_5fold.csv     # 942 patients, 3163 recordings
-│   ├── patient_folds_3fold.csv
 │   └── generate_5fold_assignments.py
 ├── src/
 │   ├── models/ast_qa.py                    # the published frozen-backbone model
@@ -97,26 +99,9 @@ python compute_significance_paired.py   # vs. fine-tuned backbone, paired
 
 ### Backbone adaptation ablation
 
-3-fold conditions, which also serve as the AST reference for the backbone swap:
-
-```bash
-cd src/reviewer1_unfreezing_ablation
-python train_unfreezing_ablation_cv.py --unfreeze_mode frozen \
-    --data_dir ../../../dataset/ --output_dir ../../results/reviewer1_unfreezing_ablation/frozen_3fold/ \
-    --n_folds 3 --epochs 5 --seed 42
-python train_unfreezing_ablation_cv.py --unfreeze_mode full --backbone_lr 5e-5 --grad_checkpointing \
-    --data_dir ../../../dataset/ --output_dir ../../results/reviewer1_unfreezing_ablation/full_3fold/ \
-    --n_folds 3 --epochs 5 --seed 42
-python train_unfreezing_ablation_cv.py --unfreeze_mode topk --topk_layers 2 \
-    --data_dir ../../../dataset/ --output_dir ../../results/reviewer1_unfreezing_ablation/topk2_3fold/ \
-    --n_folds 3 --epochs 5 --seed 42
-python train_unfreezing_ablation_cv.py --unfreeze_mode topk --topk_layers 4 \
-    --data_dir ../../../dataset/ --output_dir ../../results/reviewer1_unfreezing_ablation/topk4_3fold/ \
-    --n_folds 3 --epochs 5 --seed 42
-```
-
-5-fold conditions, the three training strategies under the fine-tuned backbone, and the
-per-lambda matched benchmark:
+All four conditions, the three training strategies under the fine-tuned backbone, and the
+per-lambda matched benchmark, all at 5-fold. `frozen_5fold/` and `full_5fold_variable/` also
+serve as the AST reference for the backbone swap below:
 
 ```bash
 cd src/reviewer1_unfreezing_ablation
@@ -151,20 +136,25 @@ for lam in 0.0 0.25 0.5 1.0 5.0 10.0 25.0 50.0 75.0 100.0; do
 done
 ```
 
-### Backbone swap (3-fold)
+### Backbone swap (5-fold)
+
+`compute_significance_full_paired.py` reads its AST reference from
+`results/reviewer1_unfreezing_ablation/{frozen_5fold,full_5fold_variable}/`, so that step
+must have produced those two directories first (either from this run or from the checked-in
+results) before it can pair fold for fold.
 
 ```bash
 cd src/reviewer7_backbone_swap
 for bb in panns yamnet hubert; do
   python train_backbone_swap_cv.py --backbone $bb --unfreeze_mode frozen \
       --data_dir ../../../dataset/ --output_dir ../../results/reviewer7_backbone_swap/$bb/ \
-      --n_folds 3 --epochs 5 --seed 42
+      --n_folds 5 --epochs 5 --seed 42
   python train_backbone_swap_cv.py --backbone $bb --unfreeze_mode full \
       --data_dir ../../../dataset/ --output_dir ../../results/reviewer7_backbone_swap/${bb}_full/ \
-      --n_folds 3 --epochs 5 --backbone_lr 5e-5 --seed 42
+      --n_folds 5 --epochs 5 --backbone_lr 5e-5 --seed 42
 done
-python compute_significance_vs_ast.py
-python compute_significance_full_paired.py
+python compute_significance_vs_ast.py         # vs. published frozen 10-fold model, unpaired
+python compute_significance_full_paired.py    # vs. Step 3's matched 5-fold AST results, paired
 ```
 
 ### Denoise-then-classify

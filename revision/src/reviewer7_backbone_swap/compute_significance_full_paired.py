@@ -35,7 +35,11 @@ computed over N_FOLDS observations, so its power is limited; the bootstrap
 interval over pooled test cases is the primary statistic.
 
 Both sides must have been run with the same fold count, which N_FOLDS below
-fixes; see ../../README.md for the fold counts of the checked-in results.
+fixes; see ../../README.md for the fold counts of the checked-in results. The
+AST side reuses the unfreezing ablation's own 5-fold results
+(frozen_5fold/, full_5fold_variable/) rather than a separate run, since that
+experiment already trains AST under the same variable-noise protocol at the
+same fold count.
 
 Writes results/reviewer7_backbone_swap/significance_full_paired.json.
 
@@ -60,7 +64,7 @@ BACKBONE_DIR = REVISION_ROOT / "results" / "reviewer7_backbone_swap"
 OUTPUT_DIR = BACKBONE_DIR
 
 LAMBDAS = [0.0, 0.25, 0.5, 1.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0]
-N_FOLDS = 3
+N_FOLDS = 5
 B = 1000
 SEED = 42
 
@@ -71,6 +75,11 @@ BACKBONES = {
     "yamnet": {"frozen": "yamnet", "full": "yamnet_full"},
     "hubert": {"frozen": "hubert", "full": "hubert_full"},
 }
+
+# The unfreezing ablation keeps one directory per training strategy, not just
+# per unfreezing mode, so "full" is not simply "full_5fold": full_5fold_variable
+# is the one trained with this experiment's own variable-noise protocol.
+ABLATION_MODE_DIRS = {"frozen": "frozen_5fold", "full": "full_5fold_variable"}
 
 
 def load_fold(base_dir: Path, lam: float, fold: int) -> pd.DataFrame:
@@ -186,9 +195,9 @@ def main():
     out = {
         "methodology_note": (
             "PAIRED comparison of AST against each alternative backbone, within matching "
-            "unfreezing modes, using the 3-fold runs on both sides: "
-            "results/reviewer1_unfreezing_ablation/{frozen,full}_3fold/ for AST and "
-            "results/reviewer7_backbone_swap/{panns,yamnet,hubert}[_full]/ for the "
+            "unfreezing modes, using the 5-fold runs on both sides: "
+            "results/reviewer1_unfreezing_ablation/{frozen_5fold,full_5fold_variable}/ for "
+            "AST and results/reviewer7_backbone_swap/{panns,yamnet,hubert}[_full]/ for the "
             "alternatives. Both sides construct folds, file ordering and synthesized "
             "negatives identically, so predictions correspond row by row; the loader "
             "asserts matching row counts, basenames and labels before pairing. This "
@@ -199,11 +208,7 @@ def main():
         "bootstrap_iterations": B, "n_folds": N_FOLDS, "seed": SEED,
     }
     for mode in ("frozen", "full"):
-        # The unfreezing ablation's results are stored per fold count, as
-        # {mode}_3fold and {mode}_5fold. This comparison reads the 3fold
-        # directories because pairing requires the AST reference to have been
-        # run with the same fold count as the backbone-swap results (N_FOLDS).
-        ast_dir = ABLATION_DIR / f"{mode}_3fold" / "raw_predictions"
+        ast_dir = ABLATION_DIR / ABLATION_MODE_DIRS[mode] / "raw_predictions"
         for backbone, dirs in BACKBONES.items():
             meth_dir = BACKBONE_DIR / dirs[mode] / "raw_predictions"
             print(f"=== AST ({mode}) vs {backbone} ({mode}) ===")

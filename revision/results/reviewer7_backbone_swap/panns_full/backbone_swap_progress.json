@@ -1,252 +1,416 @@
 {
   "backbone": "panns",
   "unfreeze_mode": "full",
-  "folds_done": 3,
+  "folds_done": 5,
   "per_fold": [
     {
       "0.0": {
-        "accuracy": 0.972091,
-        "auroc": 0.999996,
-        "auprc": 0.999996,
-        "f1": 0.972849,
+        "accuracy": 0.986508,
+        "auroc": 0.999995,
+        "auprc": 0.999995,
+        "f1": 0.986688,
         "sensitivity": 1.0,
-        "specificity": 0.944182
+        "specificity": 0.973016
       },
       "0.25": {
-        "accuracy": 0.971618,
-        "auroc": 0.999826,
-        "auprc": 0.99983,
-        "f1": 0.972376,
-        "sensitivity": 0.999054,
-        "specificity": 0.944182
+        "accuracy": 0.985714,
+        "auroc": 0.999902,
+        "auprc": 0.999903,
+        "f1": 0.985893,
+        "sensitivity": 0.998413,
+        "specificity": 0.973016
       },
       "0.5": {
-        "accuracy": 0.971145,
-        "auroc": 0.999286,
-        "auprc": 0.999395,
-        "f1": 0.971902,
-        "sensitivity": 0.998108,
-        "specificity": 0.944182
+        "accuracy": 0.985714,
+        "auroc": 0.999108,
+        "auprc": 0.999311,
+        "f1": 0.985893,
+        "sensitivity": 0.998413,
+        "specificity": 0.973016
       },
       "1.0": {
-        "accuracy": 0.967833,
-        "auroc": 0.997872,
-        "auprc": 0.998241,
-        "f1": 0.968577,
-        "sensitivity": 0.991485,
-        "specificity": 0.944182
+        "accuracy": 0.979365,
+        "auroc": 0.997795,
+        "auprc": 0.998254,
+        "f1": 0.979495,
+        "sensitivity": 0.985714,
+        "specificity": 0.973016
       },
       "5.0": {
-        "accuracy": 0.882687,
-        "auroc": 0.955158,
-        "auprc": 0.961964,
-        "f1": 0.875,
-        "sensitivity": 0.821192,
-        "specificity": 0.944182
+        "accuracy": 0.883333,
+        "auroc": 0.957662,
+        "auprc": 0.963326,
+        "f1": 0.87184,
+        "sensitivity": 0.793651,
+        "specificity": 0.973016
       },
       "10.0": {
-        "accuracy": 0.762062,
-        "auroc": 0.862968,
-        "auprc": 0.881407,
-        "f1": 0.70908,
-        "sensitivity": 0.579943,
-        "specificity": 0.944182
+        "accuracy": 0.73254,
+        "auroc": 0.861512,
+        "auprc": 0.87822,
+        "f1": 0.647858,
+        "sensitivity": 0.492063,
+        "specificity": 0.973016
       },
       "25.0": {
-        "accuracy": 0.583254,
-        "auroc": 0.681482,
-        "auprc": 0.693613,
-        "f1": 0.34789,
-        "sensitivity": 0.222327,
-        "specificity": 0.944182
+        "accuracy": 0.569048,
+        "auroc": 0.674785,
+        "auprc": 0.68878,
+        "f1": 0.276964,
+        "sensitivity": 0.165079,
+        "specificity": 0.973016
       },
       "50.0": {
-        "accuracy": 0.516083,
-        "auroc": 0.574279,
-        "auprc": 0.568019,
-        "f1": 0.153846,
-        "sensitivity": 0.087985,
-        "specificity": 0.944182
+        "accuracy": 0.519048,
+        "auroc": 0.583104,
+        "auprc": 0.578641,
+        "f1": 0.119186,
+        "sensitivity": 0.065079,
+        "specificity": 0.973016
       },
       "75.0": {
-        "accuracy": 0.503784,
-        "auroc": 0.539152,
-        "auprc": 0.53298,
-        "f1": 0.113271,
-        "sensitivity": 0.063387,
-        "specificity": 0.944182
+        "accuracy": 0.509524,
+        "auroc": 0.554145,
+        "auprc": 0.546635,
+        "f1": 0.085799,
+        "sensitivity": 0.046032,
+        "specificity": 0.973016
       },
       "100.0": {
-        "accuracy": 0.500473,
-        "auroc": 0.523779,
-        "auprc": 0.518272,
-        "f1": 0.102041,
-        "sensitivity": 0.056764,
-        "specificity": 0.944182
+        "accuracy": 0.502381,
+        "auroc": 0.541633,
+        "auprc": 0.530361,
+        "f1": 0.05997,
+        "sensitivity": 0.031746,
+        "specificity": 0.973016
       }
     },
     {
       "0.0": {
-        "accuracy": 0.974903,
-        "auroc": 0.999391,
-        "auprc": 0.999485,
-        "f1": 0.975495,
-        "sensitivity": 0.999035,
-        "specificity": 0.950772
+        "accuracy": 0.96904,
+        "auroc": 0.999787,
+        "auprc": 0.999811,
+        "f1": 0.969925,
+        "sensitivity": 0.998452,
+        "specificity": 0.939628
       },
       "0.25": {
-        "accuracy": 0.973456,
-        "auroc": 0.999021,
-        "auprc": 0.999149,
-        "f1": 0.974044,
-        "sensitivity": 0.996139,
-        "specificity": 0.950772
+        "accuracy": 0.96904,
+        "auroc": 0.999044,
+        "auprc": 0.999305,
+        "f1": 0.969925,
+        "sensitivity": 0.998452,
+        "specificity": 0.939628
       },
       "0.5": {
-        "accuracy": 0.972973,
-        "auroc": 0.998539,
-        "auprc": 0.9987,
-        "f1": 0.97356,
-        "sensitivity": 0.995174,
-        "specificity": 0.950772
+        "accuracy": 0.96904,
+        "auroc": 0.998859,
+        "auprc": 0.999044,
+        "f1": 0.969925,
+        "sensitivity": 0.998452,
+        "specificity": 0.939628
       },
       "1.0": {
-        "accuracy": 0.967664,
-        "auroc": 0.996944,
-        "auprc": 0.997181,
-        "f1": 0.968201,
-        "sensitivity": 0.984556,
-        "specificity": 0.950772
+        "accuracy": 0.96517,
+        "auroc": 0.996755,
+        "auprc": 0.997416,
+        "f1": 0.966038,
+        "sensitivity": 0.990712,
+        "specificity": 0.939628
       },
       "5.0": {
-        "accuracy": 0.840251,
-        "auroc": 0.924587,
-        "auprc": 0.932703,
-        "f1": 0.820402,
-        "sensitivity": 0.72973,
-        "specificity": 0.950772
+        "accuracy": 0.880805,
+        "auroc": 0.946863,
+        "auprc": 0.953677,
+        "f1": 0.873355,
+        "sensitivity": 0.821981,
+        "specificity": 0.939628
       },
       "10.0": {
-        "accuracy": 0.716699,
-        "auroc": 0.819111,
-        "auprc": 0.828314,
-        "f1": 0.63012,
-        "sensitivity": 0.482625,
-        "specificity": 0.950772
+        "accuracy": 0.762384,
+        "auroc": 0.851743,
+        "auprc": 0.865126,
+        "f1": 0.711195,
+        "sensitivity": 0.585139,
+        "specificity": 0.939628
       },
       "25.0": {
-        "accuracy": 0.555985,
-        "auroc": 0.639701,
-        "auprc": 0.639417,
-        "f1": 0.266348,
-        "sensitivity": 0.161197,
-        "specificity": 0.950772
+        "accuracy": 0.579721,
+        "auroc": 0.669763,
+        "auprc": 0.673655,
+        "f1": 0.34341,
+        "sensitivity": 0.219814,
+        "specificity": 0.939628
       },
       "50.0": {
-        "accuracy": 0.513996,
-        "auroc": 0.551803,
-        "auprc": 0.546306,
-        "f1": 0.137104,
-        "sensitivity": 0.07722,
-        "specificity": 0.950772
+        "accuracy": 0.52322,
+        "auroc": 0.568219,
+        "auprc": 0.565573,
+        "f1": 0.183024,
+        "sensitivity": 0.106811,
+        "specificity": 0.939628
       },
       "75.0": {
-        "accuracy": 0.504826,
-        "auroc": 0.521467,
-        "auprc": 0.519966,
-        "f1": 0.106272,
-        "sensitivity": 0.05888,
-        "specificity": 0.950772
+        "accuracy": 0.510062,
+        "auroc": 0.525281,
+        "auprc": 0.524162,
+        "f1": 0.141113,
+        "sensitivity": 0.080495,
+        "specificity": 0.939628
       },
       "100.0": {
-        "accuracy": 0.503378,
-        "auroc": 0.509104,
-        "auprc": 0.511975,
-        "f1": 0.10131,
-        "sensitivity": 0.055985,
-        "specificity": 0.950772
+        "accuracy": 0.506966,
+        "auroc": 0.512444,
+        "auprc": 0.514138,
+        "f1": 0.130969,
+        "sensitivity": 0.074303,
+        "specificity": 0.939628
       }
     },
     {
       "0.0": {
-        "accuracy": 0.976168,
-        "auroc": 0.999973,
-        "auprc": 0.999973,
-        "f1": 0.976723,
+        "accuracy": 0.986928,
+        "auroc": 1.0,
+        "auprc": 1.0,
+        "f1": 0.987097,
         "sensitivity": 1.0,
-        "specificity": 0.952336
+        "specificity": 0.973856
       },
       "0.25": {
-        "accuracy": 0.975234,
-        "auroc": 0.999759,
-        "auprc": 0.999769,
-        "f1": 0.975788,
-        "sensitivity": 0.998131,
-        "specificity": 0.952336
+        "accuracy": 0.985294,
+        "auroc": 0.999757,
+        "auprc": 0.999768,
+        "f1": 0.98546,
+        "sensitivity": 0.996732,
+        "specificity": 0.973856
       },
       "0.5": {
-        "accuracy": 0.974299,
-        "auroc": 0.999365,
-        "auprc": 0.999406,
-        "f1": 0.974851,
-        "sensitivity": 0.996262,
-        "specificity": 0.952336
+        "accuracy": 0.98366,
+        "auroc": 0.99921,
+        "auprc": 0.999268,
+        "f1": 0.983819,
+        "sensitivity": 0.993464,
+        "specificity": 0.973856
       },
       "1.0": {
-        "accuracy": 0.968224,
-        "auroc": 0.997745,
-        "auprc": 0.997924,
-        "f1": 0.968721,
-        "sensitivity": 0.984112,
-        "specificity": 0.952336
+        "accuracy": 0.977124,
+        "auroc": 0.997213,
+        "auprc": 0.997629,
+        "f1": 0.977199,
+        "sensitivity": 0.980392,
+        "specificity": 0.973856
       },
       "5.0": {
-        "accuracy": 0.852804,
-        "auroc": 0.941319,
-        "auprc": 0.950938,
-        "f1": 0.836533,
-        "sensitivity": 0.753271,
-        "specificity": 0.952336
+        "accuracy": 0.861928,
+        "auroc": 0.9417,
+        "auprc": 0.953567,
+        "f1": 0.844526,
+        "sensitivity": 0.75,
+        "specificity": 0.973856
       },
       "10.0": {
-        "accuracy": 0.721495,
-        "auroc": 0.847574,
-        "auprc": 0.865958,
-        "f1": 0.63791,
-        "sensitivity": 0.490654,
-        "specificity": 0.952336
+        "accuracy": 0.732026,
+        "auroc": 0.84731,
+        "auprc": 0.873198,
+        "f1": 0.646552,
+        "sensitivity": 0.490196,
+        "specificity": 0.973856
       },
       "25.0": {
-        "accuracy": 0.564953,
-        "auroc": 0.663576,
-        "auprc": 0.676309,
-        "f1": 0.289855,
-        "sensitivity": 0.17757,
-        "specificity": 0.952336
+        "accuracy": 0.56781,
+        "auroc": 0.666771,
+        "auprc": 0.690021,
+        "f1": 0.272352,
+        "sensitivity": 0.161765,
+        "specificity": 0.973856
       },
       "50.0": {
-        "accuracy": 0.514486,
-        "auroc": 0.562652,
-        "auprc": 0.558647,
-        "f1": 0.136326,
-        "sensitivity": 0.076636,
-        "specificity": 0.952336
+        "accuracy": 0.514706,
+        "auroc": 0.562057,
+        "auprc": 0.56292,
+        "f1": 0.102719,
+        "sensitivity": 0.055556,
+        "specificity": 0.973856
       },
       "75.0": {
-        "accuracy": 0.501869,
-        "auroc": 0.531355,
-        "auprc": 0.524562,
-        "f1": 0.093537,
-        "sensitivity": 0.051402,
-        "specificity": 0.952336
+        "accuracy": 0.503268,
+        "auroc": 0.527065,
+        "auprc": 0.524779,
+        "f1": 0.061728,
+        "sensitivity": 0.03268,
+        "specificity": 0.973856
       },
       "100.0": {
-        "accuracy": 0.500467,
-        "auroc": 0.517736,
-        "auprc": 0.512688,
-        "f1": 0.088662,
-        "sensitivity": 0.048598,
-        "specificity": 0.952336
+        "accuracy": 0.498366,
+        "auroc": 0.509943,
+        "auprc": 0.506655,
+        "f1": 0.043614,
+        "sensitivity": 0.022876,
+        "specificity": 0.973856
+      }
+    },
+    {
+      "0.0": {
+        "accuracy": 0.972527,
+        "auroc": 0.999995,
+        "auprc": 0.999995,
+        "f1": 0.973262,
+        "sensitivity": 1.0,
+        "specificity": 0.945055
+      },
+      "0.25": {
+        "accuracy": 0.971743,
+        "auroc": 0.999396,
+        "auprc": 0.999538,
+        "f1": 0.972477,
+        "sensitivity": 0.99843,
+        "specificity": 0.945055
+      },
+      "0.5": {
+        "accuracy": 0.971743,
+        "auroc": 0.999243,
+        "auprc": 0.999378,
+        "f1": 0.972477,
+        "sensitivity": 0.99843,
+        "specificity": 0.945055
+      },
+      "1.0": {
+        "accuracy": 0.970173,
+        "auroc": 0.999056,
+        "auprc": 0.9991,
+        "f1": 0.970904,
+        "sensitivity": 0.99529,
+        "specificity": 0.945055
+      },
+      "5.0": {
+        "accuracy": 0.900314,
+        "auroc": 0.958713,
+        "auprc": 0.965527,
+        "f1": 0.895645,
+        "sensitivity": 0.855573,
+        "specificity": 0.945055
+      },
+      "10.0": {
+        "accuracy": 0.758242,
+        "auroc": 0.864428,
+        "auprc": 0.88374,
+        "f1": 0.702703,
+        "sensitivity": 0.571429,
+        "specificity": 0.945055
+      },
+      "25.0": {
+        "accuracy": 0.596546,
+        "auroc": 0.685703,
+        "auprc": 0.710673,
+        "f1": 0.380723,
+        "sensitivity": 0.248038,
+        "specificity": 0.945055
+      },
+      "50.0": {
+        "accuracy": 0.532182,
+        "auroc": 0.577807,
+        "auprc": 0.590547,
+        "f1": 0.203209,
+        "sensitivity": 0.119309,
+        "specificity": 0.945055
+      },
+      "75.0": {
+        "accuracy": 0.519623,
+        "auroc": 0.541959,
+        "auprc": 0.553266,
+        "f1": 0.163934,
+        "sensitivity": 0.094192,
+        "specificity": 0.945055
+      },
+      "100.0": {
+        "accuracy": 0.514914,
+        "auroc": 0.526975,
+        "auprc": 0.540119,
+        "f1": 0.14876,
+        "sensitivity": 0.084772,
+        "specificity": 0.945055
+      }
+    },
+    {
+      "0.0": {
+        "accuracy": 0.969436,
+        "auroc": 0.999912,
+        "auprc": 0.999913,
+        "f1": 0.970342,
+        "sensitivity": 1.0,
+        "specificity": 0.938871
+      },
+      "0.25": {
+        "accuracy": 0.967868,
+        "auroc": 0.999074,
+        "auprc": 0.999177,
+        "f1": 0.968774,
+        "sensitivity": 0.996865,
+        "specificity": 0.938871
+      },
+      "0.5": {
+        "accuracy": 0.96395,
+        "auroc": 0.998661,
+        "auprc": 0.99877,
+        "f1": 0.964832,
+        "sensitivity": 0.989028,
+        "specificity": 0.938871
+      },
+      "1.0": {
+        "accuracy": 0.960031,
+        "auroc": 0.996654,
+        "auprc": 0.99699,
+        "f1": 0.96086,
+        "sensitivity": 0.981191,
+        "specificity": 0.938871
+      },
+      "5.0": {
+        "accuracy": 0.852665,
+        "auroc": 0.942195,
+        "auprc": 0.94914,
+        "f1": 0.838765,
+        "sensitivity": 0.766458,
+        "specificity": 0.938871
+      },
+      "10.0": {
+        "accuracy": 0.731975,
+        "auroc": 0.85067,
+        "auprc": 0.863107,
+        "f1": 0.662055,
+        "sensitivity": 0.525078,
+        "specificity": 0.938871
+      },
+      "25.0": {
+        "accuracy": 0.5721,
+        "auroc": 0.666815,
+        "auprc": 0.67224,
+        "f1": 0.324257,
+        "sensitivity": 0.205329,
+        "specificity": 0.938871
+      },
+      "50.0": {
+        "accuracy": 0.523511,
+        "auroc": 0.578272,
+        "auprc": 0.571623,
+        "f1": 0.184987,
+        "sensitivity": 0.10815,
+        "specificity": 0.938871
+      },
+      "75.0": {
+        "accuracy": 0.510188,
+        "auroc": 0.547243,
+        "auprc": 0.539294,
+        "f1": 0.142661,
+        "sensitivity": 0.081505,
+        "specificity": 0.938871
+      },
+      "100.0": {
+        "accuracy": 0.50627,
+        "auroc": 0.536559,
+        "auprc": 0.529929,
+        "f1": 0.129834,
+        "sensitivity": 0.073668,
+        "specificity": 0.938871
       }
     }
   ]

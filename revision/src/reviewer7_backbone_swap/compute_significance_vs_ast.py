@@ -261,7 +261,7 @@ def main():
             "UNPAIRED comparison. The AST-QA side is the published variable-noise "
             "(noise_0_10) model evaluated at 10-fold, read from "
             "results/three_strategies_cv/; each alternative backbone was evaluated at "
-            "3-fold. Because the two sides use different fold structures, the held-out "
+            "5-fold. Because the two sides use different fold structures, the held-out "
             "items do not correspond and this is not a paired test. A further limitation: "
             "only part of the published model's raw per-fold prediction CSVs survives "
             "(fold_1, fold_2 and fold_10, with fold_2 itself incomplete), so the AST-QA "
@@ -277,7 +277,7 @@ def main():
     for backbone in BACKBONES:
         lam_dir_exists = (BACKBONE_RESULTS_DIR / backbone / "raw_predictions").exists()
         print("=" * 90)
-        print(f"  AST-QA (noise_0_10) vs {backbone} -- UNPAIRED bootstrap comparison (AST-QA 10-fold [~2 pooled] vs {backbone} 3-fold first-pass)")
+        print(f"  AST-QA (noise_0_10) vs {backbone} -- UNPAIRED bootstrap comparison (AST-QA 10-fold [~2 pooled] vs {backbone} 5-fold)")
         print("=" * 90)
         if not lam_dir_exists:
             print(f"  [skip] no raw_predictions found for '{backbone}' yet -- run "

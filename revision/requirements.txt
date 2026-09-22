@@ -7,13 +7,27 @@
 
 torch>=2.5.0
 torchaudio>=2.5.0
-tensorflow           # LU-Net (reviewer7_denoiser_benchmark) only -- Keras/TF model, not PyTorch
-tf-keras             # legacy Keras-2 compat, needed to load LU-Net's pre-Keras-3 .h5 checkpoint
+tensorflow==2.20.0   # LU-Net (reviewer7_denoiser_benchmark) only -- Keras/TF model, not PyTorch.
+                     # Pinned (unlike the original PAPER_REVISIONS/reviewer7_denoiser_benchmark/
+                     # requirements.txt, which leaves this unpinned) because an unpinned
+                     # tensorflow combined with numpy<2.0.0 below sends pip's resolver into
+                     # multi-minute backtracking across keras/ml_dtypes/h5py version
+                     # combinations on a fresh install -- confirmed directly, not assumed.
+                     # 2.20.0 is confirmed compatible with numpy<2.0.0 (requires numpy>=1.26.0).
+tf-keras==2.20.1     # legacy Keras-2 compat, needed to load LU-Net's pre-Keras-3 .h5 checkpoint;
+                     # pinned to the release matching tensorflow==2.20.0 above.
 transformers==4.57.3
 huggingface_hub==0.36.0
 safetensors==0.7.0
 librosa==0.11.0
-numpy<2.0.0
+# numpy<2.0.0 matches the Python 3.11 cloud training container this package's
+# checked-in results were produced on. On Python 3.13, tensorflow's own
+# ml-dtypes dependency requires numpy>=2.1.0 -- confirmed via a real `pip
+# install --dry-run` ResolutionImpossible error, not assumed -- making
+# numpy<2.0.0 unsatisfiable there. Split by python_version so a fresh
+# Python 3.13 install can still succeed rather than failing outright.
+numpy<2.0.0; python_version < "3.13"
+numpy; python_version >= "3.13"
 pandas
 scikit-learn
 scipy

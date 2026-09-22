@@ -38,6 +38,10 @@ Two experiments are included:
   for the additional experiments run for this paper's major-revision response
   (baselines vs. prior methods, backbone-swap comparison, backbone fine-tuning
   ablation, denoise-vs-noise-aware-training comparison). See revision/README.md.
+  This package's own run_all.sh offers to hand off into revision/run_all.sh as
+  its last step, so a single ./run_all.sh invocation can reproduce everything;
+  answer "n" there and run revision/run_all.sh separately if you'd rather do
+  the two packages independently.
 
 
 REQUIREMENTS

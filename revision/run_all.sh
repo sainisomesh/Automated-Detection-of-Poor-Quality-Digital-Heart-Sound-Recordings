@@ -9,10 +9,11 @@
 #   Step 2  Comparison against two published PCG quality-assessment methods
 #           (Tang et al. 2021, Giordano et al. 2021), 5-fold, CPU only.
 #   Step 3  Backbone adaptation ablation: frozen, fully fine-tuned, and
-#           top-K-layer unfreezing, at 3-fold (3a) and 5-fold (3b), plus the
-#           per-lambda matched benchmark for the fully fine-tuned model.
+#           top-K-layer unfreezing, 5-fold, plus the per-lambda matched
+#           benchmark for the fully fine-tuned model.
 #   Step 4  Backbone swap: PANNs CNN14, YAMNet and HuBERT substituted for the
-#           AST encoder, each frozen and fully fine-tuned, 3-fold.
+#           AST encoder, each frozen and fully fine-tuned, 5-fold, matched
+#           against Step 3's frozen/full AST results for a paired comparison.
 #   Step 5  Denoise-then-classify comparison: a clean-only classifier
 #           evaluated on corrupted audio with and without each denoiser, run
 #           for both the fully fine-tuned model (5-fold) and the frozen model
@@ -83,30 +84,7 @@ fi
 echo ""
 
 # ── Step 3: Backbone adaptation ablation ──────────────────────────
-echo "── Step 3a: Backbone adaptation ablation, 3-fold ──"
-echo "Results in results/reviewer1_unfreezing_ablation/{frozen,full,topk2,topk4}_3fold/."
-echo "These provide the AST reference values for the 3-fold backbone-swap comparison in Step 4."
-read -p "Rerun 3-fold unfreezing ablation (all 4 conditions)? [y/N]: " run_unfreeze3
-if [[ "$run_unfreeze3" =~ ^[Yy]$ ]]; then
-    cd src/reviewer1_unfreezing_ablation
-    for mode_arg in "frozen:frozen_3fold" "full:full_3fold" "topk:topk2_3fold" "topk:topk4_3fold"; do
-        mode="${mode_arg%%:*}"; outdir="${mode_arg##*:}"
-        extra=""
-        [[ "$outdir" == topk2_3fold ]] && extra="--topk_layers 2"
-        [[ "$outdir" == topk4_3fold ]] && extra="--topk_layers 4"
-        [[ "$mode" == full ]] && extra="--backbone_lr 5e-5 --grad_checkpointing"
-        python train_unfreezing_ablation_cv.py --unfreeze_mode "$mode" $extra \
-            --data_dir "$DATA_DIR/" --output_dir "../../results/reviewer1_unfreezing_ablation/$outdir/" \
-            --n_folds 3 --epochs 5 --seed 42
-    done
-    cd "$SCRIPT_DIR"
-    echo "✓ 3-fold unfreezing ablation complete"
-else
-    echo "Skipping (results already checked in)"
-fi
-echo ""
-
-echo "── Step 3b: Backbone adaptation ablation, 5-fold, plus per-lambda benchmark ──"
+echo "── Step 3: Backbone adaptation ablation, 5-fold, plus per-lambda benchmark ──"
 echo "Results in results/reviewer1_unfreezing_ablation/{frozen,full,topk2,topk4}_5fold/,"
 echo "full_5fold_{clean,fixed10,variable}/ and per_lambda_unfrozen/. These are the ablation"
 echo "table, the per-lambda table and the metrics-vs-noise figure in the manuscript."
@@ -147,21 +125,26 @@ else
 fi
 echo ""
 
-# ── Step 4: Backbone swap — 3-fold, frozen and fine-tuned, GPU ────
+# ── Step 4: Backbone swap — 5-fold, frozen and fine-tuned, GPU ────
 echo "── Step 4: Backbone swap (PANNs / YAMNet / HuBERT, frozen and fully fine-tuned) ──"
-echo "3-fold patient-level CV. Results in"
-echo "results/reviewer7_backbone_swap/{panns,yamnet,hubert}[_full]/."
+echo "5-fold patient-level CV, matched against Step 3's frozen_5fold/full_5fold_variable AST"
+echo "results for a paired comparison. Results in results/reviewer7_backbone_swap/{panns,yamnet,hubert}[_full]/."
 read -p "Rerun backbone swap (all 3 backbones x both modes)? [y/N]: " run_backbone
 if [[ "$run_backbone" =~ ^[Yy]$ ]]; then
     cd src/reviewer7_backbone_swap
     for bb in panns yamnet hubert; do
         python train_backbone_swap_cv.py --backbone "$bb" --unfreeze_mode frozen \
             --data_dir "$DATA_DIR/" --output_dir "../../results/reviewer7_backbone_swap/$bb/" \
-            --n_folds 3 --epochs 5 --seed 42
+            --n_folds 5 --epochs 5 --seed 42
         python train_backbone_swap_cv.py --backbone "$bb" --unfreeze_mode full \
             --data_dir "$DATA_DIR/" --output_dir "../../results/reviewer7_backbone_swap/${bb}_full/" \
-            --n_folds 3 --epochs 5 --backbone_lr 5e-5 --seed 42
+            --n_folds 5 --epochs 5 --backbone_lr 5e-5 --seed 42
     done
+    echo "Significance testing against AST-QA is computed by two separate scripts:"
+    echo "  compute_significance_vs_ast.py        unpaired comparison vs. the published frozen model"
+    echo "  compute_significance_full_paired.py   paired comparison vs. Step 3's matched-fold results"
+    python compute_significance_vs_ast.py
+    python compute_significance_full_paired.py
     cd "$SCRIPT_DIR"
     echo "✓ Backbone swap complete"
 else
