@@ -1,5 +1,5 @@
 {
-  "methodology_note": "PAIRED comparison of AST against each alternative backbone, within matching unfreezing modes, using the 5-fold runs on both sides: results/reviewer1_unfreezing_ablation/{frozen_5fold,full_5fold_variable}/ for AST and results/reviewer7_backbone_swap/{panns,yamnet,hubert}[_full]/ for the alternatives. Both sides construct folds, file ordering and synthesized negatives identically, so predictions correspond row by row; the loader asserts matching row counts, basenames and labels before pairing. This enables a paired bootstrap and a paired t-test on per-fold AUROCs. Distinct from compute_significance_vs_ast.py, which compares against the published frozen 10-fold model and is unpaired.",
+  "methodology_note": "Paired comparison of AST against each alternative backbone in the same unfreezing mode, 5-fold on both sides: results/reviewer1_unfreezing_ablation/{frozen_5fold,full_5fold_variable}/ for AST and results/reviewer7_backbone_swap/{panns,yamnet,hubert}[_full]/ for the other backbones. Folds, file order and noise-only negatives are built the same way in both, so predictions are paired row by row (row counts, basenames and labels are checked). Paired bootstrap on pooled AUROC and paired t-test on per-fold AUROCs.",
   "bootstrap_iterations": 1000,
   "n_folds": 5,
   "seed": 42,

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-Compute Metrics from Raw Prediction CSVs.
+Compute metrics from raw per-fold prediction CSVs.
 
-Works on both per-lambda and three-strategy result directories.
-Can verify re-run results against the bundled reference results.
+Works on both the per-lambda and three-strategy result directories.
 
 Usage:
     python compute_metrics.py --results_dir results/
@@ -51,7 +50,7 @@ def compute_all_metrics(y_true, y_probs, threshold=0.5):
 
 
 def aggregate_mean_ci(fold_metrics, n_folds):
-    """Aggregate fold-level metrics into mean ± 95% CI."""
+    """Aggregate fold-level metrics into mean and 95% Student's t CI."""
     df = pd.DataFrame(fold_metrics)
     means = {}
     cis = {}
@@ -154,7 +153,7 @@ def print_per_lambda_table(results):
 def print_three_strategy_table(results):
     """Print formatted three-strategy results table."""
     print("\n" + "=" * 120)
-    print("  THREE TRAINING STRATEGIES — AUROC COMPARISON")
+    print("  THREE TRAINING STRATEGIES: AUROC COMPARISON")
     print("=" * 120)
     print(f"{'Lambda':>8} {'Clean':>18} {'Noise [0,10]':>18} {'Noise 10':>18}")
     print("-" * 80)

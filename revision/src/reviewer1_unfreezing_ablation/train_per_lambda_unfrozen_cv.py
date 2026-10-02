@@ -2,39 +2,30 @@
 """
 Per-lambda matched benchmark with a fully fine-tuned AST backbone.
 
-This is the unfrozen-backbone counterpart of the paper's matched per-lambda
-benchmark (src/train_per_lambda_cv.py), in which a fresh model is trained and
-tested at the *same* noise intensity, giving the upper bound on achievable
-performance at each lambda. The published benchmark trains
-ASTHeartQA(freeze_base=True); here the same protocol is run with
-ASTHeartQAUnfreeze, by default in end-to-end fine-tuning mode. It is a separate
-script rather than a flag on the original so that the code path reproducing the
-published table is left untouched.
+Unfrozen-backbone version of the paper's matched per-lambda benchmark
+(src/train_per_lambda_cv.py), where a fresh model is trained and tested at the
+same noise level, giving an upper bound at each lambda. The published benchmark
+uses ASTHeartQA(freeze_base=True); this script runs the same protocol with
+ASTHeartQAUnfreeze, by default with end-to-end fine-tuning. It is a separate
+script so the code that reproduces the published table stays unchanged.
 
-One lambda per invocation (rather than an internal sweep), so that the
-(lambda, fold) grid can be spread over independent jobs instead of being
-trained serially in a single process. --lambda_val is therefore required, and
-it sets both the training and the test noise intensity -- that is what makes
-the benchmark "matched".
+One lambda per invocation, so the (lambda, fold) grid can run as separate
+jobs. --lambda_val is required and sets both the training and test noise
+level.
 
---unfreeze_mode selects the backbone adaptation policy: "full" (the default,
-used for the reported benchmark) or "frozen". The progressive top-K schedule
-is specific to the ablation and is implemented in
-train_unfreezing_ablation_cv.py rather than here.
+--unfreeze_mode is "full" (default, used for the reported benchmark) or
+"frozen". The top-K schedule is only in train_unfreezing_ablation_cv.py.
 
-Cross-validation is patient-level: recordings are grouped by the patient id
-parsed from the filename (`13918_AV.wav` -> `13918`) and whole patients are
-assigned to folds, so no patient appears in both the train and test side of a
-fold. The split is recomputed deterministically from
-KFold(n_splits=--n_folds, shuffle=True, random_state=--seed) over the sorted
-patient ids, reproducing the frozen assignments stored in
-revision/fold_assignments/patient_folds_{3,5}fold.csv for the matching fold
-count; the CSVs are documentation and audit references, not runtime inputs.
+Splits are patient-level: recordings are grouped by the patient id in the
+filename (`13918_AV.wav` -> `13918`) and whole patients are assigned to folds.
+Folds come from KFold(n_splits=--n_folds, shuffle=True, random_state=--seed)
+over the sorted patient ids; with the defaults (5 folds, seed 42) this gives
+the assignments in revision/fold_assignments/patient_folds_5fold.csv. The CSV
+is a reference copy and is not read at runtime.
 
-The audio pipeline (load_audio / mix_rms) and PerLambdaDataset are reproduced
-unchanged from src/train_per_lambda_cv.py so that all compared methods see
-identical inputs; build_optimizer matches
-train_unfreezing_ablation_cv.py's two-learning-rate setup.
+load_audio / mix_rms and PerLambdaDataset are copied from
+src/train_per_lambda_cv.py; build_optimizer is the same two-learning-rate setup
+as in train_unfreezing_ablation_cv.py.
 
 Outputs (under --output_dir):
   raw_predictions/lambda_<L>/fold_<N>/predictions.csv
@@ -42,8 +33,8 @@ Outputs (under --output_dir):
   per_lambda_unfrozen_final_results.json    aggregated mean + CI
   convergence_log.csv                       per-epoch loss, time, peak GPU memory
 
-Fine-tuning the 86M-parameter backbone is intended to run on a GPU; combine
---limit_patients with small --n_folds / --epochs for a local smoke test.
+Fine-tuning the 86M-parameter backbone needs a GPU; combine --limit_patients
+with small --n_folds / --epochs for a local smoke test.
 
 Usage:
     python train_per_lambda_unfrozen_cv.py --lambda_val 5.0 \\
@@ -96,16 +87,13 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-# --- Audio pipeline and dataset, reproduced unchanged from
-# src/train_per_lambda_cv.py. Every method compared in the revision shares this
-# pipeline, so it must stay identical across scripts. ---
+# Audio pipeline and dataset, copied from src/train_per_lambda_cv.py
 def load_audio(path):
     """Load one file as a fixed-length, normalized 16 kHz mono waveform.
 
-    Resamples to TARGET_SR, removes the DC offset, band-passes to the
-    20-1000 Hz range where heart-sound energy lives (2nd-order high-pass,
-    5th-order low-pass), and peak-normalizes. The result is trimmed or
-    loop-padded (np.tile) to exactly MAX_LENGTH samples (10 s).
+    Resamples to TARGET_SR, removes the DC offset, band-passes to 20-1000 Hz
+    (2nd-order high-pass, 5th-order low-pass), and peak-normalizes. The result
+    is trimmed or loop-padded (np.tile) to MAX_LENGTH samples (10 s).
 
     Returns None for unreadable, too-short (<100 samples) or effectively
     silent files, which callers replace with a zero-filled waveform.
@@ -136,11 +124,9 @@ def load_audio(path):
 def mix_rms(heart, noise, lam):
     """Add noise to a heart sound at RMS-matched intensity lambda.
 
-    The noise is rescaled so its RMS equals the heart sound's before being
-    weighted by lambda, so lambda is an energy ratio rather than an absolute
-    gain: lambda = 1 gives 0 dB SNR, lambda = 10 gives ten times the cardiac
-    RMS energy. The mixture is rescaled if it would otherwise clip beyond
-    +/-1.0.
+    The noise is rescaled to the heart sound's RMS before weighting by lambda,
+    so lambda = 1 is 0 dB SNR and lambda = 10 is ten times the cardiac RMS.
+    The mixture is rescaled if it would clip beyond +/-1.0.
     """
     if lam == 0:
         return heart
@@ -160,14 +146,13 @@ class PerLambdaDataset(Dataset):
     """Class-balanced dataset at one fixed noise intensity.
 
     Indices [0, n) are heart recordings mixed at `lambda_val` (label 1) and
-    indices [n, 2n) are noise-only clips (label 0), giving a 50/50 balance.
+    indices [n, 2n) are noise-only clips (label 0).
 
     Args:
-        is_train: Training sets draw fresh noise from the global RNG on every
-            access, so each epoch sees new mixtures. Evaluation sets
-            (`is_train=False`) derive the noise from an index-seeded RNG
-            instead, so the same evaluation index always receives the same
-            interference across lambdas, folds and models.
+        is_train: If True, noise comes from the global RNG on every access
+            (new mixtures each epoch). If False, noise comes from an
+            index-seeded RNG, so each test index gets the same noise across
+            lambdas, folds and models.
     """
 
     def __init__(self, heart_files, icbhi_files, env_files, lambda_val, processor, is_train=True):
@@ -187,11 +172,8 @@ class PerLambdaDataset(Dataset):
         """Build one composite interference waveform: lung + 0.5 * environmental.
 
         A respiratory recording (ICBHI 2017) is summed with a half-weighted
-        environmental clip (ESC-50 / UrbanSound8K) and peak-normalized,
-        modelling clinical auscultation in which internal physiological
-        interference dominates ambient noise. When `idx` is given the two
-        source clips are drawn from an RNG seeded by it, making the noise
-        reproducible per sample index.
+        environmental clip (ESC-50 / UrbanSound8K) and peak-normalized. If
+        `idx` is given, clips are drawn from random.Random(42 + idx).
         """
         if idx is not None:
             local_rng = random.Random(42 + idx)
@@ -231,12 +213,9 @@ class PerLambdaDataset(Dataset):
             "labels": torch.tensor(label, dtype=torch.float),
             "filename": filename,
         }
-# --- end of reproduced audio pipeline and dataset ---
 
 
-# --- Google Cloud Storage helpers, used only when this script runs as a
-# managed cloud training job (--gcs_bucket). They are a no-op for local runs,
-# and `google-cloud-storage` is imported lazily so it is not a hard dependency. ---
+# Optional Google Cloud Storage I/O for --gcs_bucket; not used in local runs.
 def download_from_gcs(bucket_name, prefix, local_dir):
     """Mirror every object under gs://bucket/prefix into local_dir."""
     from google.cloud import storage
@@ -270,19 +249,14 @@ def upload_to_gcs(bucket_name, local_dir, prefix):
             blob_path = f"{prefix}/{rel}"
             bucket.blob(blob_path).upload_from_filename(local_path)
     logger.info(f"Uploaded {local_dir} -> gs://{bucket_name}/{prefix}")
-# --- end of cloud-storage helpers ---
 
 
 def build_optimizer(model, phase, head_lr, backbone_lr):
     """Build the AdamW optimizer for the given training phase.
 
-    With a frozen encoder there is only one parameter group, the QA head at
-    `head_lr`. Once any part of the backbone is trainable, the optimizer uses
-    two groups: the head stays at `head_lr` while the unfrozen pretrained
-    encoder parameters are trained at the lower `backbone_lr`, so fine-tuning
-    perturbs the AudioSet representation far less than it adapts the
-    randomly-initialized head. Identical to the function of the same name in
-    train_unfreezing_ablation_cv.py.
+    Frozen encoder: one group, the QA head at `head_lr`. Otherwise two groups:
+    the head at `head_lr` and the unfrozen encoder parameters at the lower
+    `backbone_lr`. Same as build_optimizer in train_unfreezing_ablation_cv.py.
     """
     if phase == "frozen":
         return torch.optim.AdamW(model.qa_classifier.parameters(), lr=head_lr)
@@ -296,19 +270,15 @@ def build_optimizer(model, phase, head_lr, backbone_lr):
 def train_one_fold(unfreeze_mode, train_loader, lambda_val, fold, device, args, convergence_rows):
     """Train a fresh model on one fold at this job's fixed lambda.
 
-    Appends one convergence row per epoch (mean loss, wall-clock duration and
-    peak GPU memory, the latter None on CPU) and returns the trained model.
+    Appends one convergence row per epoch (mean loss, wall-clock time, peak
+    GPU memory or None on CPU) and returns the trained model.
     """
     logger.info(f"  --> [Train] mode={unfreeze_mode} Lambda={lambda_val}, Fold={fold}")
     model = ASTHeartQAUnfreeze(unfreeze_mode=unfreeze_mode, topk_layers=0).to(device)
     if args.grad_checkpointing and unfreeze_mode == "full":
-        # use_reentrant=False is required, not a stylistic preference: the
-        # default reentrant torch.utils.checkpoint implementation drops the
-        # gradients of a checkpointed block's own trainable parameters whenever
-        # the activation entering that block does not require grad, which is
-        # the case for the first unfrozen block of any partially frozen
-        # encoder. The same keyword is used at the corresponding call site in
-        # train_unfreezing_ablation_cv.py.
+        # use_reentrant=False, as in train_unfreezing_ablation_cv.py (reentrant
+        # checkpointing drops parameter gradients of a block whose input does
+        # not require grad).
         model.encoder.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     logger.info(f"  trainable params = {model.num_trainable_parameters():,} / {model.num_total_parameters():,}")
     optimizer = build_optimizer(model, unfreeze_mode, args.head_lr, args.backbone_lr)
@@ -348,11 +318,9 @@ def train_one_fold(unfreeze_mode, train_loader, lambda_val, fold, device, args, 
 def evaluate_fold(model, test_loader, device):
     """Score the held-out fold and return metrics plus raw per-clip outputs.
 
-    Metrics are the six reported quantities at the fixed 0.5 decision
-    threshold; AUROC and AUPRC fall back to 0.5 / 0.0 if the label set is
-    degenerate (single class), which can only happen on very small debug runs.
-    The returned predictions are written to disk so every metric can be
-    recomputed from the stored probabilities.
+    The six reported metrics at a 0.5 threshold; AUROC and AUPRC fall back to
+    0.5 / 0.0 if only one class is present (tiny debug runs). The caller
+    writes the predictions to disk.
     """
     model.eval()
     y_true, y_probs, filenames = [], [], []
@@ -419,7 +387,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--head_lr", type=float, default=1e-4)
     parser.add_argument("--backbone_lr", type=float, default=5e-5,
-                         help="Learning rate for the unfrozen encoder parameters; deliberately "
+                         help="Learning rate for the unfrozen encoder parameters; "
                               "lower than --head_lr")
     parser.add_argument("--grad_checkpointing", action="store_true",
                          help="Trade compute for memory by checkpointing encoder activations; "
@@ -462,10 +430,8 @@ def main():
     if not heart_files:
         raise ValueError(f"No heart audio files found in {data_dir}")
 
-    # Group recordings by patient: filenames are "<patient_id>_<valve>.wav",
-    # so the id is the part before the first underscore. Folds are drawn over
-    # patient ids, never over individual files, which is what keeps all four
-    # auscultation-point recordings of a patient on the same side of a split.
+    # Group by patient ("<patient_id>_<valve>.wav") so all of a patient's
+    # recordings share a fold.
     patient_map = {}
     for f in heart_files:
         pid = f.name.split("_")[0]
@@ -481,10 +447,7 @@ def main():
         num_mel_bins=128, max_length=1024, sampling_rate=16000, f_min=0, f_max=8000
     )
 
-    # Folds are over the sorted patient id list with a fixed seed, so the
-    # assignment is identical across lambdas, modes and reruns, and matches
-    # the checked-in fold assignment CSVs for the same n_folds and seed. This
-    # construction is shared with train_unfreezing_ablation_cv.py.
+    # Same fold construction as train_unfreezing_ablation_cv.py
     kf = KFold(n_splits=args.n_folds, shuffle=True, random_state=args.seed)
     fold_metrics = []
     convergence_rows = []
@@ -494,10 +457,8 @@ def main():
         tr_hearts = [f for i in train_idx for f in patient_map[pids[i]]]
         te_hearts = [f for i in test_idx for f in patient_map[pids[i]]]
 
-        # The interference corpora are split 80/20 per fold as well, so the
-        # lung and environmental clips heard at test time were never used to
-        # build training mixtures. The shuffle is seeded per fold for
-        # reproducibility, and the two slices are disjoint by construction.
+        # Noise corpora are split 80/20 per fold so test noise clips are never
+        # used in training.
         rng = random.Random(args.seed + fold)
         tr_icbhi = sorted(list(icbhi_files))
         tr_env = sorted(list(env_files))
@@ -535,13 +496,10 @@ def main():
                        "folds_done": fold + 1, "per_fold": fold_metrics}, f, indent=2)
 
         if args.gcs_bucket:
-            # Upload after every fold rather than only at the end, so that a
-            # job interrupted mid-run still leaves the completed folds'
-            # predictions and logs in the bucket.
+            # Upload after each fold so an interrupted job keeps finished folds
             upload_to_gcs(args.gcs_bucket, output_dir, output_prefix.rstrip("/"))
 
-    # Aggregate across folds: mean of the per-fold metrics and a half-width
-    # confidence interval from the across-fold spread.
+    # Mean over folds and normal-approximation 95% CI half-width
     means = {m: float(np.mean([f[m] for f in fold_metrics])) for m in fold_metrics[0]}
     cis = {m: float(1.96 * np.std([f[m] for f in fold_metrics]) / np.sqrt(args.n_folds)) for m in fold_metrics[0]}
     final_results = {"mean": means, "ci": cis}

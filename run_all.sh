@@ -1,145 +1,145 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ============================================================================
-# RUN ALL — Reproduce AST Heart Quality Noise Robustness Experiments
+# RUN ALL: reproduce the results of "Automated Detection of Poor-Quality
+# Digital Heart Sounds via Noise Augmentation"
 # ============================================================================
 #
-# This script runs the complete reproducibility pipeline:
-#   1. Installs dependencies
-#   2. (Optional) Generates pre-mixed datasets for each λ
-#   3. Runs Per-Lambda 10-Fold CV
-#   4. Runs Three Training Strategies 10-Fold CV
-#   5. Computes metrics from raw predictions
-#   6. Generates all paper figures
-#   7. (Optional) Hands off to revision/run_all.sh for the four revision
-#      experiments (baselines, backbone ablation, backbone swap, denoiser
-#      benchmark) -- a separate interactive script, one prompt per experiment.
+# Step 1  Verify (minutes, CPU only, no data download). Recomputes every
+#         table, significance marker and quoted number in the manuscript
+#         from the checked-in per-fold predictions, re-runs the paired
+#         significance tests, and regenerates Figure 3.
+# Step 2  Retrain the revised manuscript's experiments (GPU, optional).
+#         Hands off to revision/run_all.sh, which prompts per experiment.
+# Step 3  Retrain the original preprint's frozen-backbone, 10-fold
+#         experiments (GPU, optional). The revised manuscript uses them only
+#         for the variable-noise column of Table 6's frozen panel.
 #
 # Usage:
-#   chmod +x run_all.sh
-#   ./run_all.sh
+#   ./run_all.sh                 verify, then ask before any retraining
+#   ./run_all.sh --verify-only   verify and stop
+#   ./run_all.sh --yes           verify and retrain everything without asking
 #
-# Requirements:
-#   - Python 3.8+
-#   - CUDA-enabled GPU recommended (~8GB VRAM)
-#   - ~4 GB disk for datasets, ~2 GB for results
-#
-# Estimated runtime on A100 GPU:
-#   Per-Lambda CV:        ~24 hours (10 λ × 10 folds × 5 epochs)
-#   Three Strategies CV:  ~36 hours (3 strategies × 10 folds × 5 epochs × 10 λ eval)
-#
+# Requires bash (Linux, macOS, or Git Bash / WSL on Windows) and Python
+# 3.9-3.13. A virtual environment is created in .venv/ automatically.
 # ============================================================================
 
-set -e  # Exit on error
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+source "$SCRIPT_DIR/env_setup.sh"
+
+VERIFY_ONLY=0
+export ASSUME_YES=0
+for arg in "$@"; do
+    case "$arg" in
+        --verify-only) VERIFY_ONLY=1 ;;
+        --yes|-y) ASSUME_YES=1 ;;
+        -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+        *) echo "Unknown option: $arg (see --help)" >&2; exit 1 ;;
+    esac
+done
 
 echo "============================================"
-echo "  AST Heart Quality — Reproducibility Suite"
+echo "  AST Heart Quality Reproducibility Suite"
 echo "============================================"
 echo ""
 
-# ── Step 0: Dataset (auto-downloads from Zenodo if missing) ────────
-bash "$SCRIPT_DIR/download_data.sh" "$SCRIPT_DIR/dataset"
-echo "  PhysioNet2022: $(find dataset/PhysioNet2022 -name '*.wav' | wc -l | tr -d ' ') files"
-echo "  ICBHI2017:     $(find dataset/ICBHI2017 -name '*.wav' | wc -l | tr -d ' ') files"
-echo "  ESC-50:        $(find dataset/ESC-50 -name '*.wav' | wc -l | tr -d ' ') files"
-echo "  UrbanSound8K:  $(find dataset/UrbanSound8K -name '*.wav' | wc -l | tr -d ' ') files"
+setup_python
 echo ""
 
-# ── Step 1: Install dependencies ──────────────────────────────────
-echo "── Step 1: Installing dependencies ──"
-pip install -r requirements.txt
+# ── Step 1: Verify the manuscript against the released predictions ─
+echo "── Step 1: Verifying manuscript results from checked-in predictions ──"
+install_requirements requirements-verify.txt
 echo ""
 
-# ── Step 2: (Optional) Generate pre-mixed datasets ────────────────
-echo "── Step 2: Generate pre-mixed datasets (optional) ──"
-read -p "Generate pre-mixed WAV files for each λ? (~19 GB, can skip) [y/N]: " gen_mixed
-if [[ "$gen_mixed" =~ ^[Yy]$ ]]; then
-    echo "Generating mixed datasets..."
-    python src/generate_mixed_datasets.py \
-        --data_dir dataset/ \
-        --output_dir mixed_dataset/ \
-        --seed 42
-    echo "✓ Mixed datasets generated"
+python verify_paper_results.py
+
+echo ""
+echo "Re-running the paired significance tests (deterministic, B=1000)..."
+SIG_A=revision/results/reviewer1_baselines/significance_vs_ast_qa_unfrozen_paired.json
+SIG_B=revision/results/reviewer7_backbone_swap/significance_full_paired.json
+BACKUP="$(mktemp -d)"
+cp "$SIG_A" "$BACKUP/a.json"
+cp "$SIG_B" "$BACKUP/b.json"
+(cd revision/src/reviewer1_baselines && python compute_significance_paired.py > /dev/null)
+(cd revision/src/reviewer7_backbone_swap && python compute_significance_full_paired.py > /dev/null)
+SIG_OK=0
+python - "$BACKUP/a.json" "$SIG_A" "$BACKUP/b.json" "$SIG_B" <<'PY' || SIG_OK=1
+import json, math, sys
+
+def same(a, b):
+    if isinstance(a, dict):
+        return isinstance(b, dict) and a.keys() == b.keys() and all(same(a[k], b[k]) for k in a)
+    if isinstance(a, list):
+        return isinstance(b, list) and len(a) == len(b) and all(map(same, a, b))
+    if isinstance(a, float) or isinstance(b, float):
+        return math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-12)
+    return a == b
+
+args = sys.argv[1:]
+ok = all(same(json.load(open(args[i])), json.load(open(args[i + 1]))) for i in range(0, len(args), 2))
+sys.exit(0 if ok else 1)
+PY
+cp "$BACKUP/a.json" "$SIG_A"
+cp "$BACKUP/b.json" "$SIG_B"
+rm -rf "$BACKUP"
+if [ "$SIG_OK" = "0" ]; then
+    echo "✓ Significance tests reproduce the checked-in JSONs"
 else
-    echo "Skipping pre-mixed generation (mixing will happen on-the-fly during training)"
+    echo "✗ Regenerated significance results differ from the checked-in JSONs" >&2
+    exit 1
 fi
+
+echo ""
+echo "Regenerating Figure 3..."
+python revision/src/figures/regenerate_fig3_unfrozen.py > /dev/null
+echo "✓ Figure 3 panels written to revision/results/figures/"
 echo ""
 
-# ── Step 3: Per-Lambda CV ─────────────────────────────────────────
-echo "── Step 3: Per-Lambda Cross-Validation ──"
-echo "Training separate models for each λ value (10 λ × 10 folds × 5 epochs)"
-echo "This will take several hours on GPU..."
-echo ""
+if [ "$VERIFY_ONLY" = "1" ]; then
+    echo "Verification complete (--verify-only, no retraining)."
+    exit 0
+fi
 
-cd src/
-python train_per_lambda_cv.py \
-    --data_dir ../dataset/ \
-    --output_dir ../results/per_lambda_cv/ \
-    --n_folds 10 \
-    --epochs 5 \
-    --seed 42
-
-echo "✓ Per-Lambda CV complete"
-echo ""
-
-# ── Step 4: Three Training Strategies CV ──────────────────────────
-echo "── Step 4: Three Training Strategies Cross-Validation ──"
-echo "Training clean / noise_0_10 / noise_10 strategies (3 × 10 folds × 5 epochs)"
-echo "This will take several hours on GPU..."
-echo ""
-
-python train_three_strategies_cv.py \
-    --data_dir ../dataset/ \
-    --output_dir ../results/three_strategies_cv/ \
-    --n_folds 10 \
-    --epochs 5 \
-    --seed 42
-
-echo "✓ Three Strategies CV complete"
-echo ""
-
-# ── Step 5: Compute metrics ───────────────────────────────────────
-echo "── Step 5: Computing metrics from raw predictions ──"
-python compute_metrics.py --results_dir ../results/
-echo ""
-
-# ── Step 6: Generate figures ──────────────────────────────────────
-echo "── Step 6: Generating paper figures ──"
-python visualize_results.py \
-    --results_dir ../results/ \
-    --output_dir ../results/figures/
-
-cd ..
-echo ""
-
-# ── Step 7: Revision experiments (optional) ───────────────────────
-echo "── Step 7: Revision experiments ──"
-echo "Reproduces the four additional experiments from the revised manuscript"
-echo "(published baselines, backbone adaptation ablation, backbone swap,"
-echo "denoise-then-classify) via the separate revision/run_all.sh, which prompts"
-echo "once per experiment. See revision/README.md for details."
-read -p "Continue into the revision experiments now? [y/N]: " run_revision
-if [[ "$run_revision" =~ ^[Yy]$ ]]; then
+# ── Step 2: Retrain the revised manuscript's experiments ──────────
+echo "── Step 2: Retrain the revised manuscript's experiments (GPU) ──"
+echo "Overwrites the checked-in results under revision/results/ in place;"
+echo "run verify_paper_results.py afterwards to compare against the manuscript."
+if ask "Continue into the revision experiments?"; then
     bash "$SCRIPT_DIR/revision/run_all.sh"
 else
-    echo "Skipping (run revision/run_all.sh directly whenever you're ready)"
+    echo "Skipping"
 fi
 echo ""
 
-# ── Done ──────────────────────────────────────────────────────────
-echo "============================================"
-echo "  ✅ ALL EXPERIMENTS COMPLETE"
-echo "============================================"
+# ── Step 3: Original preprint experiments (frozen, 10-fold) ───────
+echo "── Step 3: Original preprint experiments (frozen backbone, 10-fold, GPU) ──"
+echo "Per-lambda CV (10 lambdas x 10 folds) and three training strategies (3 x 10 folds)."
+echo "Roughly 60 GPU-hours on an A100. Overwrites results/ in place."
+if ask "Retrain the original 10-fold experiments?"; then
+    install_requirements requirements.txt
+    python download_data.py dataset
+
+    if ask "Also write the pre-mixed WAV files for each lambda (~19 GB, for inspection only)?"; then
+        python src/generate_mixed_datasets.py --data_dir dataset/ --output_dir mixed_dataset/ --seed 42
+    fi
+
+    cd src
+    python train_per_lambda_cv.py \
+        --data_dir ../dataset/ --output_dir ../results/per_lambda_cv/ \
+        --n_folds 10 --epochs 5 --seed 42
+    python train_three_strategies_cv.py \
+        --data_dir ../dataset/ --output_dir ../results/three_strategies_cv/ \
+        --n_folds 10 --epochs 5 --seed 42
+    python compute_metrics.py --results_dir ../results/
+    cd ..
+    echo "✓ Original experiments complete"
+else
+    echo "Skipping"
+fi
 echo ""
-echo "Results saved to:"
-echo "  results/per_lambda_cv/          Per-lambda predictions + metrics"
-echo "  results/three_strategies_cv/    Three-strategy predictions + metrics"
-echo "  results/figures/                Paper figures (PNG + CSV)"
-echo "  revision/results/               Revision experiments, if Step 7 ran"
-echo ""
-echo "To verify against reference results, compare:"
-echo "  results/per_lambda_cv/per_lambda_progress.json"
-echo "  results/three_strategies_cv/final_results.json"
-echo "with the files in results/ (pre-computed from Vertex AI)."
+
+echo "============================================"
+echo "  RUN COMPLETE"
+echo "============================================"

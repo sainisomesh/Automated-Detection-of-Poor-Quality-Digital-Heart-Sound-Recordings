@@ -1,102 +1,107 @@
-Audio Spectrogram Transformer Heart Quality - Noise Robustness Evaluation
-=================================================
+Automated Detection of Poor-Quality Digital Heart Sounds via Noise Augmentation
+==============================================================================
+
+Code, results and reproduction scripts for the manuscript of the same title
+(SSRN: https://ssrn.com/abstract=6749564). Data: https://doi.org/10.5281/zenodo.19638493
+
 
 DESCRIPTION
 -----------
-This repository contains the code and data to reproduce the noise robustness evaluation of the Audio Spectrogram Transfomer (AST) model for digital heart sound quality detection. 
+The model classifies 10-second phonocardiogram recordings as acceptable
+heart sound (label 1) or noise-dominated (label 0). Log-Mel spectrograms are
+passed through the Audio Spectrogram Transformer (AST), initialized from the
+`MIT/ast-finetuned-audioset-10-10-0.4593` checkpoint on Hugging Face, with a
+binary classification head (768 -> 128 -> 1). In the revised manuscript the
+whole backbone is fine-tuned together with the head.
 
-The AST model classifies 10-second audio recordings as either
-containing a valid heart sound (label=1) or being noise-contaminated
-(label=0). It uses Mel-spectrograms processed through MIT's pretrained
-Audio Spectrogram Transformer (AST). Specifically, we take the 
-`MIT/ast-finetuned-audioset-10-10-0.4593` checkpoint from Hugging Face, 
-which was originally pre-trained on the AudioSet dataset. We extract 
-this base transformer encoder and fine-tune it by adding a custom 
-binary classification head for heart quality assurance.
-
-Noise contamination is controlled by a parameter λ using RMS-based mixing:
+Noise is added with RMS-matched mixing controlled by an intensity λ:
 
     mixed = heart + λ × (noise × (rms_heart / rms_noise))
     where noise = lung_sound + 0.5 × environmental_sound
 
-Two experiments are included:
-
-  1. Per-Lambda Cross-Validation
-     Trains a separate model at each noise level (λ), 10-fold
-     patient-level CV. Tests how well a model trained at a specific
-     noise level performs at that same level.
-     λ ∈ {0, 0.25, 0.5, 1, 5, 10, 25, 50, 75, 100}
-
-  2. Three Training Strategies
-     Compares three noise-aware training approaches, each evaluated
-     across all 10 λ test levels, 10-fold patient-level CV:
-       - Clean:      Trained on clean heart sounds only
-       - Noise [0,10]: Trained with random noise λ ~ Uniform[0, 10]
-       - Noise 10:   Trained with fixed noise λ = 10
-
-  The revision/ subfolder is a separate, self-contained reproducibility package
-  for the additional experiments run for this paper's major-revision response
-  (baselines vs. prior methods, backbone-swap comparison, backbone fine-tuning
-  ablation, denoise-vs-noise-aware-training comparison). See revision/README.md.
-  This package's own run_all.sh offers to hand off into revision/run_all.sh as
-  its last step, so a single ./run_all.sh invocation can reproduce everything;
-  answer "n" there and run revision/run_all.sh separately if you'd rather do
-  the two packages independently.
+and every model is evaluated at λ ∈ {0, 0.25, 0.5, 1, 5, 10, 25, 50, 75, 100}
+with patient-level cross-validation (seed 42).
 
 
-REQUIREMENTS
-------------
-  Python 3.8+
-  CUDA-enabled GPU recommended
+QUICK START
+-----------
+    ./run_all.sh
 
-  Install dependencies:
-    pip install -r requirements.txt
+On Windows, run this from Git Bash or WSL. The only prerequisite is
+Python 3.9-3.13 on PATH (as python3, python or py); the script creates a
+virtual environment in .venv/ and installs everything else itself.
+
+The first step takes about a minute on a laptop CPU and needs no GPU and no
+data download. It recomputes every table, significance marker and quoted
+number in the manuscript from the per-fold predictions checked in under
+results/ and revision/results/, re-runs the paired significance tests, and
+regenerates Figure 3 into revision/results/figures/. It then asks before
+starting any retraining.
+
+    ./run_all.sh --verify-only   only the verification step
+    ./run_all.sh --yes           verification, then all retraining without prompts
+
+verify_paper_results.py can also be run on its own (needs numpy, pandas,
+scikit-learn; see requirements-verify.txt).
+
+
+WHERE EACH RESULT COMES FROM
+----------------------------
+  Manuscript item                        Results directory
+  -------------------------------------  -----------------------------------------------------------
+  Table 2  per-λ matched benchmark       revision/results/reviewer1_unfreezing_ablation/per_lambda_unfrozen/
+  Figure 3 training strategies           revision/results/reviewer1_unfreezing_ablation/full_5fold_{clean,variable,fixed10}/
+  Table 3  published baselines           revision/results/reviewer1_baselines/
+  Table 4  backbone swap                 revision/results/reviewer7_backbone_swap/
+  Table 5  fine-tuning ablation          revision/results/reviewer1_unfreezing_ablation/{frozen,topk2,topk4}_5fold/, full_5fold_variable/
+  Table 6  denoise-then-classify         revision/results/reviewer7_denoiser_benchmark/
+  Table 6  frozen panel, variable-noise  results/three_strategies_cv/  (original 10-fold run)
+
+All experiments added in the revision use 5-fold patient-level CV with the
+splits in revision/fold_assignments/patient_folds_5fold.csv. The frozen panel
+of Table 6 uses the original 10-fold splits in fold_assignments/patient_folds.csv.
+See revision/README.md for details of each experiment.
+
+
+RETRAINING
+----------
+Retraining is optional, because every reported number already follows from
+the checked-in predictions. A CUDA GPU is needed in practice; full
+fine-tuning of the backbone needs about 3 GB of GPU memory with gradient
+checkpointing, and the complete set of experiments takes several days of
+single-GPU time. The published baselines (revision Step 1) run on CPU.
+
+  Step 2 of run_all.sh   revision/run_all.sh: the experiments of the revised
+                         manuscript, with one prompt per experiment.
+  Step 3 of run_all.sh   the original preprint's frozen-backbone, 10-fold
+                         per-λ and three-strategies experiments (src/).
+
+The first retraining step installs requirements.txt and downloads the raw
+dataset from Zenodo (~3 GB) into dataset/. Retraining writes into the same
+results directories, so afterwards run
+
+    python verify_paper_results.py
+
+to compare the new predictions with the manuscript. Expect small differences
+from GPU non-determinism.
 
 
 DATA AVAILABILITY
 -----------------
-  run_all.sh downloads and extracts the raw dataset automatically on first run
-  (it's fetched from Zenodo below) -- no manual setup needed. The pre-mixed
-  per-lambda audio is generated locally from the raw dataset instead of
-  downloaded, using src/generate_mixed_datasets.py.
+  Zenodo: https://doi.org/10.5281/zenodo.19638493
 
-  Both are also available directly on Zenodo if you'd rather fetch them
-  yourself:
-
-    DOI: https://doi.org/10.5281/zenodo.19638493
-    Download: https://zenodo.org/records/19638493
-
-  The Zenodo archive contains:
-
-  1. RAW SOURCE DATASETS (~3.5 GB)
-     The four source audio datasets used in our experiments,
-     resampled to 16 kHz mono WAV format:
+  1. ast-heart-quality-dataset.zip (~3 GB), the four source datasets
+     resampled to 16 kHz mono WAV. download_data.py fetches and extracts it:
 
      dataset/
        PhysioNet2022/training_data/   3,163 heart sound recordings
-       ICBHI2017/                     174 respiratory/lung sounds
-       ESC-50/audio/                  2,000 environmental sounds
-       UrbanSound8K/                  8,732 urban noise sounds
+       ICBHI2017/                     174 respiratory sound recordings
+       ESC-50/audio/                  environmental sounds
+       UrbanSound8K/                  urban sounds
 
-  2. PRE-MIXED DATASETS (~19 GB)
-     Heart sounds mixed with structured noise at each λ level,
-     ready for direct use. Each λ folder contains balanced
-     mixed heart+noise (label=1) and noise-only (label=0) files:
-
-     mixed_dataset/
-       lambda_0.0/                    Clean heart sounds + noise-only
-         manifest.csv                 File labels and metadata
-         {patient}_{loc}_mixed.wav    Heart + noise at λ=0
-         noise_{N}.wav                Noise-only samples
-       lambda_0.25/
-       lambda_0.5/
-       lambda_1.0/
-       lambda_5.0/
-       lambda_10.0/
-       lambda_25.0/
-       lambda_50.0/
-       lambda_75.0/
-       lambda_100.0/
+  2. ast-heart-quality-mixed-lambdas.zip (~19 GB), heart sounds mixed with
+     noise at each λ. Not needed: the denoiser benchmark generates the same
+     files locally with src/generate_mixed_datasets.py when it first runs.
 
   Sources:
     - PhysioNet 2022 CirCor:  https://physionet.org/content/circor-heart-sound/1.0.3/
@@ -104,82 +109,26 @@ DATA AVAILABILITY
     - ESC-50:                 https://github.com/karolpiczak/ESC-50
     - UrbanSound8K:           https://urbansounddataset.weebly.com/
 
-  NOTE ON MIXING: The training scripts mix noise on-the-fly during
-  training (stochastic noise selection per epoch). The pre-mixed
-  datasets use deterministic seeding for reproducibility and audio
-  inspection. To regenerate the mixed datasets locally:
 
-    python src/generate_mixed_datasets.py \
-      --data_dir dataset/ --output_dir mixed_dataset/
-
-
-HOW TO RUN
-----------
-  Option A — Run everything with one command:
-
-    chmod +x run_all.sh
-    ./run_all.sh
-
-  Option B — Run experiments individually:
-
-    cd src/
-
-    # Experiment 1: Per-Lambda CV
-    python train_per_lambda_cv.py \
-      --data_dir ../dataset/ \
-      --output_dir ../results/per_lambda_cv/ \
-      --n_folds 10 --epochs 5 --seed 42
-
-    # Experiment 2: Three Training Strategies
-    python train_three_strategies_cv.py \
-      --data_dir ../dataset/ \
-      --output_dir ../results/three_strategies_cv/ \
-      --n_folds 10 --epochs 5 --seed 42
-
-    # Compute metrics from raw prediction CSVs
-    python compute_metrics.py --results_dir ../results/
-
-    # Generate paper figures
-    python visualize_results.py \
-      --results_dir ../results/ \
-      --output_dir ../results/figures/
-
-    cd ..
-
-  Option C — Generate pre-mixed datasets (for inspection or upload):
-
-    cd src/
-
-    # Full generation (~19 GB, all λ values)
-    python generate_mixed_datasets.py \
-      --data_dir ../dataset/ --output_dir ../mixed_dataset/
-
-    # Demo mode (10 examples per λ, ~200 MB)
-    python generate_mixed_datasets.py \
-      --data_dir ../dataset/ --output_dir ../demo_samples/ --demo
-
-    cd ..
-
-
-OUTPUT
+LAYOUT
 ------
-  results/
-    per_lambda_cv/
-      per_lambda_progress.json          Aggregated AUROC/F1 per λ
-      per_lambda_metrics.csv            Summary table
-      raw_predictions/                  100 CSVs (10 λ × 10 folds)
-        lambda_{λ}/fold_{N}/predictions.csv
+  run_all.sh                 single entry point (see QUICK START)
+  verify_paper_results.py    recomputes the manuscript's numbers from predictions
+  download_data.py           fetches the source dataset from Zenodo
+  env_setup.sh               virtual environment setup shared by both run_all.sh
+  requirements.txt           full dependencies for retraining
+  requirements-verify.txt    minimal dependencies for verification
+  fold_assignments/          original 10-fold patient splits
+  src/                       original frozen-backbone, 10-fold experiments
+  results/                   predictions and metrics of the original experiments
+  revision/                  experiments added for the revised manuscript
 
-    three_strategies_cv/
-      final_results.json                Aggregated results for all strategies
-      raw_predictions/                  300 CSVs (3 strategies × 10 folds × 10 λ)
-        fold_{N}/{strategy}/lambda_{λ}.csv
 
-    extreme_stress/
-      extreme_stress_results.csv        Single-model stress test results
-
-    figures/
-      robustness_auroc_vs_noise.png     Main paper figure
-      stress_degradation_curve.png      Stress degradation curves
-      stress_sensitivity_specificity.png
-      average_metrics_table.csv
+DATA NOTES
+----------
+  results/per_lambda_cv/ holds the complete per-fold predictions of the
+  original 10-fold per-λ experiment. For the original three-strategies
+  experiment only the aggregated metrics (results/three_strategies_cv/
+  final_results.json) are complete; per-fold predictions survive for folds 1
+  and 10 and for the clean strategy of fold 2. The manuscript uses only the
+  aggregated variable-noise values from that run.

@@ -2,69 +2,70 @@
 """
 Denoise-then-classify versus noise-aware training (Reviewer #7, Comment 1).
 
-The reviewer asks why a quality classifier should be trained on noisy audio at
-all, when one could instead denoise a corrupted recording and pass it to a
-clean-trained model. This script builds that comparison:
+The reviewer asks why the quality classifier is trained on noisy audio
+instead of denoising the recording and using a clean-trained model. This
+script runs that comparison:
 
-  1. Train a genuinely clean-only AST-QA model -- heart-only positives,
-     noise-only negatives, no mixing at any lambda -- with patient-level
-     k-fold cross-validation. A clean-only checkpoint has to be trained here
-     because none exists elsewhere: the checkpoint distributed with the
-     original paper was trained at lambda = 1.0, not on clean audio.
-  2. For each fold and each lambda in the sweep, evaluate that fold's
-     clean-only model on the pre-mixed audio of that fold's held-out test
-     patients, read from `<mixed_dir>/lambda_<value>/` (produced by the same
-     RMS mixing code as the rest of this package), under several conditions:
-       - `no_denoise`: the pre-mixed audio fed straight to the model.
-       - `denoise_wavelet`: the same files through wavelet_denoise()
-         (Candidate 1 -- training-free, deterministic, untuned).
-       - `denoise_wavelet_leveldep`: the same files through this work's own
-         level-dependent wavelet variant (see wavelet_denoiser.py, including
-         its measured signal-degradation limitation).
-       - `denoise_lunet`: the same files through lunet_denoise() (Candidate 2
-         -- pretrained, with a disclosed ICBHI 2017 training-data overlap with
-         this paper's noise source; see lunet_denoiser.py).
-     Every condition sees the same folds and the same files, so the
-     comparison is paired -- the main evidence this experiment produces.
-  3. The noise-aware comparator needs no new training: the `clean` and
-     `noise_0_10` (variable noise, lambda ~ U[0, 10]) entries of
-     ../../../results/three_strategies_cv/final_results.json are the already
-     published numbers the denoiser conditions are compared against.
+  1. Train a clean-only AST-QA model (heart-only positives, noise-only
+     negatives, no mixing) with patient-level k-fold CV. This has to be
+     trained here because the checkpoint released with the paper was
+     trained at lambda = 1.0.
+  2. For each fold and lambda, evaluate that fold's clean-only model on the
+     pre-mixed audio of the fold's test patients
+     (`<mixed_dir>/lambda_<value>/`, made with the same RMS mixing code as
+     the rest of the package) under these conditions:
+       - `no_denoise`: pre-mixed audio as is.
+       - `denoise_wavelet`: wavelet_denoise() (candidate 1, no training,
+         deterministic, untuned).
+       - `denoise_wavelet_leveldep`: our level-dependent wavelet variant
+         (see wavelet_denoiser.py, including its limitation on clean audio).
+       - `denoise_lunet`: lunet_denoise() (candidate 2, pretrained; its
+         training data includes ICBHI 2017, which our noise also uses; see
+         lunet_denoiser.py).
+     All conditions use the same folds and files, so the comparison is
+     paired.
+  3. The noise-aware models need no new training: the `clean` and
+     `noise_0_10` (lambda ~ U[0, 10]) results in
+     ../../../results/three_strategies_cv/final_results.json are the
+     published numbers the denoiser conditions are compared with.
 
-Two-run workflow. `--n_folds` is required and has no default, because the
-script serves two runs that must agree on the patient split:
+Two runs share the patient split, so `--n_folds` has no default:
 
-  1. Clean-only training run: `--conditions no_denoise --save_checkpoints`
-     trains and persists one clean-only model per fold.
-  2. Denoiser comparison run: `--load_checkpoint_dir` (or, for cloud jobs,
-     `--gcs_checkpoint_prefix`) together with the full `--conditions` list
-     reloads those per-fold weights and only evaluates, so it needs no
-     training time at all. This is valid only if fold i's train/test patient
-     split is identical between the two runs, which requires the same
-     `--n_folds`, the same `--seed` and the same patient list. The script
-     therefore checks that the number of checkpoints found equals `--n_folds`
-     and aborts on a mismatch, rather than silently evaluating fold i's model
-     against another fold's held-out patients.
+  1. Training run: `--conditions no_denoise --save_checkpoints` trains and
+     saves one clean-only model per fold.
+  2. Comparison run: `--load_checkpoint_dir` (or `--gcs_checkpoint_prefix`)
+     with the full `--conditions` list loads those models and only
+     evaluates. Fold i must have the same train/test patients in both runs,
+     so `--n_folds`, `--seed` and the patient list must match; the script
+     stops if the number of checkpoints differs from `--n_folds`.
 
-Usage (paths relative to this directory):
-    # Step 1 -- clean-only training, saving per-fold weights:
+Two configurations are reported: a frozen model with 10-fold CV and a fully
+fine-tuned model (`--unfreeze_mode full`) with 5-fold CV. Commands, run from
+this directory (the same as in ../../run_all.sh):
+
+    # Frozen, 10-fold: train clean-only models, then compare denoisers
     python run_denoiser_benchmark_cv.py \\
         --data_dir ../../../dataset/ --mixed_dir ../../../mixed_dataset/ \\
-        --output_dir ../../results/reviewer7_denoiser_benchmark/clean_only/ \\
-        --n_folds 5 --conditions no_denoise --save_checkpoints \\
-        --epochs 5 --seed 42
-
-    # Step 2 -- denoiser comparison reusing Step 1's weights (no training):
+        --output_dir ../../results/reviewer7_denoiser_benchmark/clean_only_10fold/ \\
+        --n_folds 10 --conditions no_denoise --save_checkpoints --epochs 5 --seed 42
     python run_denoiser_benchmark_cv.py \\
         --data_dir ../../../dataset/ --mixed_dir ../../../mixed_dataset/ \\
-        --output_dir ../../results/reviewer7_denoiser_benchmark/denoiser_comparison/ \\
-        --n_folds 5 \\
-        --load_checkpoint_dir ../../results/reviewer7_denoiser_benchmark/clean_only/checkpoints/ \\
-        --conditions no_denoise,denoise_wavelet,denoise_wavelet_leveldep,denoise_lunet \\
+        --output_dir ../../results/reviewer7_denoiser_benchmark/denoiser_comparison_10fold/ \\
+        --n_folds 10 --conditions no_denoise,denoise_wavelet,denoise_wavelet_leveldep,denoise_lunet \\
+        --load_checkpoint_dir ../../results/reviewer7_denoiser_benchmark/clean_only_10fold/checkpoints/ \\
         --seed 42
 
-The exact commands, fold counts and model variants behind each result set
-checked into this package are listed in ../../README.md.
+    # Fully fine-tuned, 5-fold
+    python run_denoiser_benchmark_cv.py --unfreeze_mode full --backbone_lr 5e-5 --grad_checkpointing \\
+        --data_dir ../../../dataset/ --mixed_dir ../../../mixed_dataset/ \\
+        --output_dir ../../results/reviewer7_denoiser_benchmark/clean_only_full_5fold/ \\
+        --n_folds 5 --conditions no_denoise --save_checkpoints --epochs 5 --seed 42
+    python run_denoiser_benchmark_cv.py --unfreeze_mode full \\
+        --data_dir ../../../dataset/ --mixed_dir ../../../mixed_dataset/ \\
+        --output_dir ../../results/reviewer7_denoiser_benchmark/denoiser_comparison_full_5fold/ \\
+        --n_folds 5 --conditions no_denoise,denoise_wavelet,denoise_wavelet_leveldep,denoise_lunet \\
+        --load_checkpoint_dir ../../results/reviewer7_denoiser_benchmark/clean_only_full_5fold/checkpoints/ \\
+        --seed 42
 """
 
 import argparse
@@ -92,27 +93,13 @@ from transformers import ASTFeatureExtractor
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wavelet_denoiser import wavelet_denoise, wavelet_denoise_level_dependent
 from lunet_denoiser import lunet_denoise
-# A fourth denoiser candidate (T-BiLSTM) was attempted and abandoned without
-# usable weights or reported results, and its module is not included in this
-# package. The `denoise_tbilstm` condition therefore imports it lazily, only
-# when that condition is explicitly requested, so its absence cannot affect
-# the no_denoise / wavelet / LU-Net conditions that the results are based on.
+# A fourth candidate (T-BiLSTM) was dropped and its module is not included.
+# The `denoise_tbilstm` condition imports it only when requested.
 
-# Locate the package root containing src/models/ast_qa.py. Three layouts have
-# to resolve here:
-#   * this package, where the model lives at revision/src/models/ast_qa.py
-#     (parents[2] == the revision/ directory) -- this is the vendored copy
-#     that should always be preferred;
-#   * a development checkout, where the experiment sits one level deeper and
-#     the model package is at parents[3];
-#   * a container image, where only this experiment's src/ is copied in and
-#     the model package is mounted at the fixed path /app/repo_src (parents[3]
-#     may not exist at all there, hence the length guards below).
-# The candidates are tried in that order so that the locally vendored copy
-# wins deterministically instead of matching a sibling package by accident:
-# from this package's layout, parents[3] also happens to contain a
-# src/models/ast_qa.py (the same class), and relying on that would be
-# ambiguous.
+# Find the directory containing src/models/ast_qa.py: /app/repo_src in the
+# container image, otherwise revision/ (parents[2]) in this package, or
+# parents[3] in a deeper checkout. The length checks handle short paths in
+# the container.
 _CANDIDATE_REPO_ROOTS = [Path("/app/repo_src")]
 if len(Path(__file__).resolve().parents) > 2:
     _CANDIDATE_REPO_ROOTS.append(Path(__file__).resolve().parents[2])
@@ -127,12 +114,11 @@ else:
         f"Could not locate src/models/ast_qa.py under any candidate repo root: {_CANDIDATE_REPO_ROOTS}"
     )
 sys.path.insert(0, str(REPO_ROOT))
-from src.models.ast_qa import ASTHeartQA  # noqa: E402 -- the published, unmodified frozen model
+from src.models.ast_qa import ASTHeartQA  # noqa: E402  (published frozen model)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-# Local copy of the configurable-freeze model (identical architecture, see
-# unfreeze_ast_qa.py); kept per-experiment rather than shared so that each
-# experiment's code stays fixed once its results are produced.
+# Local copy of the configurable-freeze model (same architecture, see
+# unfreeze_ast_qa.py).
 from unfreeze_ast_qa import ASTHeartQAUnfreeze  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -152,15 +138,12 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-# --- audio pipeline, identical to ../../../src/train_per_lambda_cv.py ---
-# This is the same preprocessing every other method in the revision is
-# evaluated under, and the same code that generated the pre-mixed evaluation
-# corpus (see ../../../src/generate_mixed_datasets.py), so applying it to the
-# raw clean/noise training files here stays consistent with how the
-# evaluation-side files were built. Steps: load at 16 kHz mono, remove DC
-# offset, 20 Hz high-pass and 1 kHz low-pass, peak-normalize, then crop or
-# loop-pad (np.tile) to exactly 10 s. Returns None for unreadable, too-short
-# or numerically silent files so callers can skip them.
+# --- audio pipeline, same as ../../../src/train_per_lambda_cv.py ---
+# Also the code used to build the pre-mixed corpus
+# (../../../src/generate_mixed_datasets.py), so training and test audio are
+# processed the same way. Load at 16 kHz mono, remove DC offset, 20 Hz
+# high-pass and 1 kHz low-pass, peak-normalize, then crop or loop-pad
+# (np.tile) to 10 s. Returns None for unreadable, too short or silent files.
 def load_audio(path):
     try:
         wav, _ = librosa.load(path, sr=TARGET_SR, mono=True)
@@ -188,10 +171,9 @@ def load_audio(path):
 def get_noise(icbhi_files, env_files, idx=None):
     """Build one composite noise waveform: lung + 0.5 x environmental, peak-normalized.
 
-    Matches Eq. 1 of the paper. `idx` selects a per-sample deterministic RNG
-    (seeded 42 + idx) for reproducible pre-mixed generation; passing None uses
-    the global `random` stream, which is what the training dataset does so
-    that negatives vary across epochs.
+    Eq. 1 of the paper. If `idx` is given, clips are chosen with
+    random.Random(42 + idx); with None (training) the global `random` stream
+    is used, so negatives change between epochs.
     """
     if idx is not None:
         rng = random.Random(42 + idx)
@@ -213,11 +195,9 @@ class CleanOnlyTrainDataset(Dataset):
     """Clean-only training set: unmixed heart recordings as positives,
     composite noise as negatives, balanced 1:1.
 
-    This reproduces the published "Clean-Only Training" strategy (the `clean`
-    arm of ../../../src/train_three_strategies_cv.py). The mixing function is
-    never called on the positive path: at lambda = 0 it would return the heart
-    signal unchanged, so the result is the same either way, but "clean" here
-    means literally unmixed audio rather than relying on that equivalence.
+    Same as the published clean-only strategy (the `clean` arm of
+    ../../../src/train_three_strategies_cv.py). Positives are never passed
+    through the mixing function.
     """
 
     def __init__(self, heart_files, icbhi_files, env_files, processor):
@@ -246,27 +226,22 @@ class PreMixedEvalDataset(Dataset):
     """Evaluation set for one fold at one lambda, built from the pre-mixed corpus.
 
     Positives (label 1) are the pre-mixed heart+noise files in
-    `<mixed_dir>/lambda_<lam>/` whose source recording belongs to one of this
-    fold's held-out `test_pids`; the patient id is the part of the source
-    filename before the first underscore. Negatives (label 0) are pure-noise
-    files from the same directory, which carry no patient identity, shuffled
-    with a per-fold seed and truncated to the number of positives so the set
-    is exactly balanced 1:1 and deterministic per fold.
+    `<mixed_dir>/lambda_<lam>/` whose source recording is from one of the
+    fold's `test_pids` (patient id = source filename before the first
+    underscore). Negatives (label 0) are noise-only files from the same
+    directory, shuffled with a per-fold seed and cut to the number of
+    positives, giving a 1:1 set.
 
-    `condition` selects what happens to each waveform before it reaches the
-    feature extractor:
-      - 'no_denoise': passed through unmodified.
-      - 'denoise_wavelet': wavelet_denoise() -- Candidate 1, the untuned
-        skimage BayesShrink/VisuShrink implementation.
-      - 'denoise_wavelet_leveldep': wavelet_denoise_level_dependent() -- this
-        work's own per-level noise-estimation variant of Candidate 1; see
-        wavelet_denoiser.py for its authorship status and the signal energy
-        it removes even from clean recordings.
-      - 'denoise_lunet': lunet_denoise() -- Candidate 2, pretrained, with the
-        ICBHI 2017 training-data overlap documented in lunet_denoiser.py.
-      - 'denoise_tbilstm': an abandoned fourth candidate whose module is not
-        shipped with this package; selecting it requires supplying that
-        module and a trained checkpoint.
+    `condition` sets what is applied to each waveform before feature
+    extraction:
+      - 'no_denoise': nothing.
+      - 'denoise_wavelet': wavelet_denoise() (candidate 1).
+      - 'denoise_wavelet_leveldep': wavelet_denoise_level_dependent(), our
+        per-level variant (see wavelet_denoiser.py).
+      - 'denoise_lunet': lunet_denoise() (candidate 2; see the ICBHI 2017
+        note in lunet_denoiser.py).
+      - 'denoise_tbilstm': dropped candidate; needs its module and a
+        checkpoint, which are not included.
     """
 
     def __init__(self, mixed_dir, lam, test_pids, processor, condition,
@@ -300,9 +275,8 @@ class PreMixedEvalDataset(Dataset):
         filename, label = self.samples[idx]
         wav, _ = librosa.load(self.lam_dir / filename, sr=TARGET_SR, mono=True)
         if len(wav) != MAX_LENGTH:
-            # Pre-mixed files should already be exactly MAX_LENGTH; crop or
-            # loop-pad defensively rather than assume, since the corpus is
-            # downloaded separately from this code.
+            # Pre-mixed files should already be MAX_LENGTH; crop or pad in
+            # case they are not.
             if len(wav) > MAX_LENGTH:
                 wav = wav[:MAX_LENGTH]
             else:
@@ -314,8 +288,7 @@ class PreMixedEvalDataset(Dataset):
         elif self.condition == "denoise_lunet":
             wav = lunet_denoise(wav, target_sr=TARGET_SR)
         elif self.condition == "denoise_tbilstm":
-            # Imported here, not at module scope, so that the missing module
-            # only matters if this condition is actually requested.
+            # Imported here because the module is not included.
             sys.path.insert(0, str(Path(__file__).resolve().parent / "attempted_not_used"))
             from tbilstm_denoiser import tbilstm_denoise
             wav = tbilstm_denoise(wav, weights_path=self.tbilstm_checkpoint, target_sr=TARGET_SR)
@@ -331,16 +304,10 @@ def train_clean_only_model(train_loader, fold, device, epochs, lr, unfreeze_mode
                             backbone_lr=5e-5, grad_checkpointing=False):
     """Train one fold's clean-only classifier.
 
-    unfreeze_mode='frozen' trains the published frozen-backbone model
-    (ASTHeartQA with freeze_base=True) with a head-only optimizer.
-    unfreeze_mode='full' trains a fully fine-tuned clean-only model instead,
-    using two parameter groups so the encoder gets the lower `backbone_lr`
-    while the head keeps `lr`; `grad_checkpointing` trades compute for
-    activation memory so backprop through all 12 layers fits on a single GPU.
-
-    The two modes are separate comparators, not replacements for each other:
-    the denoiser conditions are evaluated against whichever clean-only model
-    a given run trains (or loads).
+    'frozen': the published frozen model (ASTHeartQA, freeze_base=True),
+    head-only optimizer. 'full': fully fine-tuned model, with the encoder at
+    the lower `backbone_lr` and the head at `lr`. `grad_checkpointing` saves
+    activation memory so backprop through all 12 layers fits on one GPU.
     """
     criterion = nn.BCEWithLogitsLoss()
     if unfreeze_mode == "frozen":
@@ -349,10 +316,9 @@ def train_clean_only_model(train_loader, fold, device, epochs, lr, unfreeze_mode
     elif unfreeze_mode == "full":
         model = ASTHeartQAUnfreeze(unfreeze_mode="full").to(device)
         if grad_checkpointing:
-            # use_reentrant=False is required, not stylistic: the reentrant
-            # checkpointing path only propagates gradients when the
-            # checkpointed block's inputs themselves require grad, which is
-            # not the case for this encoder's spectrogram input.
+            # use_reentrant=False is needed: reentrant checkpointing only
+            # propagates gradients if the block inputs require grad, and the
+            # spectrogram input does not.
             model.encoder.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         optimizer = torch.optim.AdamW([
             {"params": model.qa_classifier.parameters(), "lr": lr},
@@ -381,14 +347,11 @@ def train_clean_only_model(train_loader, fold, device, epochs, lr, unfreeze_mode
 def load_clean_only_model(checkpoint_path, device, unfreeze_mode="frozen"):
     """Rebuild a clean-only model from a checkpoint saved by a previous run.
 
-    The checkpoint contents depend on the mode, mirroring the save-side
-    branch under --save_checkpoints:
-      - 'frozen': only the qa_classifier state dict was saved, because the
-        frozen AST encoder is byte-identical across every fold; the encoder
-        is reloaded from the pretrained checkpoint and the head is restored
-        on top of it.
-      - 'full': the encoder was itself fine-tuned, and differs per fold, so
-        the entire model state dict is saved and loaded.
+    The checkpoint contents depend on the mode (see --save_checkpoints):
+      - 'frozen': only the qa_classifier state dict; the encoder is the
+        pretrained one, reloaded from the hub.
+      - 'full': the whole model state dict, since the encoder differs per
+        fold.
     """
     if unfreeze_mode == "frozen":
         model = ASTHeartQA(freeze_base=True).to(device)
@@ -408,9 +371,8 @@ def compute_metrics(y_true, probs):
     """Compute the six reported metrics at the fixed 0.5 decision threshold.
 
     Returns accuracy, AUROC, AUPRC, F1, sensitivity and specificity. AUROC
-    and AUPRC fall back to 0.5 and 0.0 respectively when they are undefined
-    (a batch containing only one class); sensitivity and specificity fall
-    back to 0.0 when their denominator is empty.
+    and AUPRC are 0.5 and 0.0 if only one class is present; sensitivity and
+    specificity are 0.0 if their denominator is zero.
     """
     preds = (probs > 0.5).astype(int)
     try:
@@ -438,11 +400,10 @@ def evaluate_condition(model, mixed_dir, lambdas, test_pids, processor, device, 
                         tbilstm_checkpoint=None):
     """Evaluate one fold's model under one condition, across every lambda.
 
-    For each lambda, builds the fold's balanced evaluation set, runs
-    inference, and writes the raw per-recording predictions to
+    For each lambda, builds the fold's test set, runs inference and saves
+    per-recording predictions to
     <output_dir>/raw_predictions/<condition>/lambda_<lam>/fold_<fold>/
-    predictions.csv so that every aggregated number can be recomputed from
-    the raw outputs. Returns {lambda: metrics dict}.
+    predictions.csv. Returns {lambda: metrics dict}.
     """
     per_lambda_metrics = {}
     for lam in lambdas:
@@ -474,11 +435,7 @@ def evaluate_condition(model, mixed_dir, lambdas, test_pids, processor, device, 
     return per_lambda_metrics
 
 
-# --- Google Cloud Storage helpers ---
-# Used only for cloud (Vertex AI) runs, where the datasets are staged in a
-# bucket and results are uploaded after every fold. Local runs never touch
-# these, and google-cloud-storage is imported lazily so it is not a hard
-# dependency of the local pipeline.
+# --- Optional Google Cloud Storage helpers, used only with --gcs_bucket ---
 def download_from_gcs(bucket_name, prefix, local_dir):
     from google.cloud import storage
     logger.info(f"Downloading from gs://{bucket_name}/{prefix} -> {local_dir}")
@@ -544,9 +501,9 @@ def main():
                               "'denoise_wavelet' (Candidate 1, untuned skimage BayesShrink/"
                               "VisuShrink); 'denoise_wavelet_leveldep' (this work's own "
                               "level-dependent noise-estimation variant of Candidate 1, not a "
-                              "separately published algorithm -- see wavelet_denoiser.py); "
+                              "separately published algorithm: see wavelet_denoiser.py); "
                               "'denoise_lunet' (Candidate 2, pretrained, with a disclosed ICBHI 2017 "
-                              "training-data overlap -- see lunet_denoiser.py); 'denoise_tbilstm' "
+                              "training-data overlap: see lunet_denoiser.py); 'denoise_tbilstm' "
                               "(an abandoned fourth candidate whose module is not shipped with this "
                               "package; needs that module plus --tbilstm_checkpoint). Use "
                               "'no_denoise' alone for the clean-only training run, then the full "
@@ -601,7 +558,7 @@ def main():
     parser.add_argument("--device", type=str, default=None,
                          help="Torch device; defaults to cuda when available, else cpu.")
     parser.add_argument("--limit_patients", type=int, default=0,
-                         help="Use only the first N patients. For smoke tests only -- results from a "
+                         help="Use only the first N patients. For smoke tests only: results from a "
                               "limited run are not comparable to the reported numbers.")
     parser.add_argument("--lambdas", type=str, default=",".join(str(l) for l in LAMBDAS),
                          help="Comma-separated noise levels to evaluate. Each must have a "
@@ -664,12 +621,12 @@ def main():
                 f"--n_folds={args.n_folds} but found {len(found_checkpoints)} checkpoint(s) in "
                 f"{checkpoint_dir}. Reusing a saved checkpoint per fold only produces a correct, "
                 f"leakage-free evaluation when this run's KFold(n_splits={args.n_folds}, seed="
-                f"{args.seed}) split is IDENTICAL to the one that produced these checkpoints -- "
+                f"{args.seed}) split is identical to the one that produced these checkpoints: "
                 f"a fold-count mismatch here means fold i's 'held-out' test patients would not "
                 f"actually match the patients fold i's checkpoint was trained without. Set "
                 f"--n_folds to the checkpoint-producing run's fold count instead of guessing."
             )
-        logger.info(f"Loaded {len(found_checkpoints)} checkpoints from {checkpoint_dir} -- "
+        logger.info(f"Loaded {len(found_checkpoints)} checkpoints from {checkpoint_dir}: "
                     f"training will be SKIPPED for every fold.")
 
     data_root = Path(data_dir)
@@ -719,22 +676,14 @@ def main():
             ckpt_dir = os.path.join(output_dir, "checkpoints")
             os.makedirs(ckpt_dir, exist_ok=True)
             if args.unfreeze_mode == "frozen":
-                # Frozen mode saves ONLY the qa_classifier state dict. The
-                # encoder is never updated by training, so it is identical
-                # across every fold (always the same pretrained
-                # MIT/ast-finetuned-audioset-10-10-0.4593 weights); storing it
-                # per fold would cost ~347 MB per fold for no information
-                # gain, while the head that does differ is ~0.4 MB.
-                # To reload: construct ASTHeartQA(freeze_base=True), then
-                # model.qa_classifier.load_state_dict(torch.load(ckpt_path)) --
-                # see load_clean_only_model().
+                # Frozen mode: save only the head (~0.4 MB). The encoder is
+                # the unchanged pretrained model (~347 MB). See
+                # load_clean_only_model() for reloading.
                 ckpt_path = os.path.join(ckpt_dir, f"fold_{fold + 1}_qa_classifier.pth")
                 torch.save(model.qa_classifier.state_dict(), ckpt_path)
                 logger.info(f"  Saved checkpoint (qa_classifier only): {ckpt_path}")
             else:
-                # In 'full' mode the encoder is itself fine-tuned and differs
-                # per fold, so the entire model state dict must be saved
-                # (~347 MB per fold; budget disk accordingly).
+                # Full mode: save the whole model (~347 MB per fold).
                 ckpt_path = os.path.join(ckpt_dir, f"fold_{fold + 1}_full.pth")
                 torch.save(model.state_dict(), ckpt_path)
                 logger.info(f"  Saved checkpoint (full model): {ckpt_path}")
@@ -755,12 +704,10 @@ def main():
             json.dump({"folds_done": fold + 1, "per_fold": all_fold_metrics}, f, indent=2)
 
         if args.gcs_bucket:
-            # Uploaded after every fold, not only at the end, so that a
-            # preempted or crashed cloud job keeps its completed folds.
+            # Upload after each fold so a preempted job keeps finished folds.
             upload_to_gcs(args.gcs_bucket, output_dir, args.output_prefix.rstrip("/"))
 
-    # Aggregate across folds: per-metric mean plus a normal-approximation 95%
-    # interval, 1.96 * SD / sqrt(n_folds).
+    # Mean across folds and 95% half-width 1.96 * SD / sqrt(n_folds).
     final_results = {}
     for condition in conditions:
         final_results[condition] = {}

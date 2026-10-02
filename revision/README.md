@@ -4,12 +4,12 @@ Reproducibility package for the four additional experiments reported in the revi
 manuscript of **Automated Detection of Poor-Quality Digital Heart Sounds via Noise
 Augmentation** ([SSRN 6749564](https://ssrn.com/abstract=6749564)).
 
-The sibling package in `../` reproduces the per-lambda and three-strategies experiments
-with a frozen backbone and 10-fold cross-validation. This package is self-contained and
-does not modify it; both use the same source datasets.
+The parent directory `../` holds the original preprint's frozen-backbone, 10-fold
+experiments and the single entry point `../run_all.sh`. Both use the same source datasets.
 
-All results reported below are checked in under `results/`, so the scripts can be read
-and verified without rerunning anything.
+All results are checked in under `results/`. `../run_all.sh` (or
+`python ../verify_paper_results.py`) recomputes every number in the manuscript from them
+without retraining.
 
 ## Experiments
 
@@ -38,13 +38,11 @@ retains the frozen-backbone results alongside it for comparison. Both are includ
   list) and so evaluate the same held-out patients fold for fold.
 - `reviewer7_backbone_swap`: `{panns,yamnet,hubert}/` are frozen, `*_full/` are fully
   fine-tuned. `compute_significance_full_paired.py` pairs each against the matching AST
-  condition above; `compute_significance_vs_ast.py` is a separate, unpaired comparison
-  against the originally published frozen 10-fold model.
+  condition above.
 - `reviewer7_denoiser_benchmark`: `*_full_5fold/` use the fine-tuned backbone,
   `*_10fold/` use the frozen backbone.
 - `reviewer1_baselines`: `compute_significance_paired.py` compares the baselines against
-  the fine-tuned model on matched folds; `compute_significance.py` compares them against
-  the frozen model.
+  the fine-tuned model on matched folds.
 
 ## Layout
 
@@ -56,7 +54,7 @@ revision/
 │   ├── patient_folds_5fold.csv     # 942 patients, 3163 recordings
 │   └── generate_5fold_assignments.py
 ├── src/
-│   ├── models/ast_qa.py                    # the published frozen-backbone model
+│   ├── models/ast_qa.py                    # AST model with the binary QA head
 │   ├── reviewer1_baselines/                # Tang and Giordano features, training, significance
 │   ├── reviewer1_unfreezing_ablation/      # frozen/fine-tuned/top-K model wrapper and training
 │   ├── reviewer7_backbone_swap/            # PANNs, YAMNet and HuBERT wrappers and training
@@ -67,14 +65,18 @@ revision/
 
 ## Setup
 
+`run_all.sh` creates a virtual environment (`../.venv/`), installs `requirements.txt`
+and downloads the source dataset into `../dataset/` the first time an experiment is
+selected. To set up by hand instead:
+
 ```bash
-cd reproducibility/revision
-pip install -r requirements.txt
+cd reproducibility
+python -m pip install -r requirements.txt
+python download_data.py dataset
 ```
 
-`run_all.sh` downloads the source dataset automatically on first run. The pre-mixed
-lambda sweep required by the denoise-then-classify experiment is generated locally from
-that dataset the first time Step 5 runs.
+The pre-mixed lambda sweep required by the denoise-then-classify experiment is generated
+locally from that dataset the first time Step 4 runs.
 
 ## Reproduction commands
 
@@ -93,8 +95,7 @@ python train_tang_baseline_cv.py \
 python train_giordano_baseline_cv.py \
     --data_dir ../../../dataset/ --output_dir ../../results/reviewer1_baselines/giordano_full/ \
     --n_folds 5 --seed 42
-python compute_significance.py          # vs. frozen backbone, unpaired
-python compute_significance_paired.py   # vs. fine-tuned backbone, paired
+python compute_significance_paired.py   # paired, vs. the fine-tuned AST-QA model
 ```
 
 ### Backbone adaptation ablation
@@ -105,15 +106,13 @@ serve as the AST reference for the backbone swap below:
 
 ```bash
 cd src/reviewer1_unfreezing_ablation
-for mode in frozen; do
-  python train_unfreezing_ablation_cv.py --unfreeze_mode $mode \
-      --data_dir ../../../dataset/ --output_dir ../../results/reviewer1_unfreezing_ablation/${mode}_5fold/ \
-      --n_folds 5 --epochs 5 --seed 42
-done
-python train_unfreezing_ablation_cv.py --unfreeze_mode topk --topk_layers 2 \
+python train_unfreezing_ablation_cv.py --unfreeze_mode frozen \
+    --data_dir ../../../dataset/ --output_dir ../../results/reviewer1_unfreezing_ablation/frozen_5fold/ \
+    --n_folds 5 --epochs 5 --seed 42
+python train_unfreezing_ablation_cv.py --unfreeze_mode topk --topk_layers 2 --grad_checkpointing \
     --data_dir ../../../dataset/ --output_dir ../../results/reviewer1_unfreezing_ablation/topk2_5fold/ \
     --n_folds 5 --epochs 5 --seed 42
-python train_unfreezing_ablation_cv.py --unfreeze_mode topk --topk_layers 4 \
+python train_unfreezing_ablation_cv.py --unfreeze_mode topk --topk_layers 4 --grad_checkpointing \
     --data_dir ../../../dataset/ --output_dir ../../results/reviewer1_unfreezing_ablation/topk4_5fold/ \
     --n_folds 5 --epochs 5 --seed 42
 python train_unfreezing_ablation_cv.py --unfreeze_mode full --backbone_lr 5e-5 --grad_checkpointing \
@@ -153,8 +152,7 @@ for bb in panns yamnet hubert; do
       --data_dir ../../../dataset/ --output_dir ../../results/reviewer7_backbone_swap/${bb}_full/ \
       --n_folds 5 --epochs 5 --backbone_lr 5e-5 --seed 42
 done
-python compute_significance_vs_ast.py         # vs. published frozen 10-fold model, unpaired
-python compute_significance_full_paired.py    # vs. Step 3's matched 5-fold AST results, paired
+python compute_significance_full_paired.py    # paired, vs. the matched 5-fold AST results
 ```
 
 ### Denoise-then-classify
@@ -200,24 +198,16 @@ python run_denoiser_benchmark_cv.py --unfreeze_mode full \
 ### Figure
 
 ```bash
-cd src/figures
-python regenerate_fig3_unfrozen.py
+python src/figures/regenerate_fig3_unfrozen.py   # writes results/figures/Fig3_*.pdf
 ```
 
 ## Verifying a fresh run
 
-Every training script writes an aggregated `*_final_results.json` with the mean and 95%
-confidence interval per metric per lambda, plus raw per-fold `predictions.csv` files.
-With the same seed and fold count, a rerun reproduces the checked-in values up to GPU
-non-determinism.
+Every training script writes raw per-fold `predictions.csv` files plus aggregated
+metrics (mean and 95% half-width, 1.96 · SD / sqrt(n_folds), per lambda). With the same
+seed and fold count, a rerun reproduces the checked-in values up to GPU non-determinism.
+`python ../verify_paper_results.py` compares whatever predictions are in `results/` with
+the values printed in the manuscript.
 
-The significance scripts are fully deterministic and read only the checked-in prediction
-CSVs, so they reproduce their JSON outputs exactly.
-
-## Data notes
-
-The raw per-fold prediction CSVs for the sibling package's three-strategies experiment are
-incomplete for folds 3 through 9; only the aggregated metrics survive for those. This
-affects one comparison, `compute_significance_vs_ast.py`, which pools the folds that are
-available and reports how many it used in both its console output and its JSON output. All
-other comparisons use complete data.
+The significance scripts are deterministic and read only the prediction CSVs, so they
+reproduce their JSON outputs exactly.

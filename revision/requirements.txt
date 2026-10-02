@@ -1,31 +1,19 @@
-# Dependencies for all four revision experiments (baselines, backbone
-# adaptation ablation, backbone swap, denoise-then-classify).
+# Dependencies for retraining the revision experiments (baselines, backbone
+# adaptation ablation, backbone swap, denoise-then-classify). Python 3.9-3.13.
 #
-# Versions are pinned to those the checked-in results were produced with.
-# transformers is pinned exactly because HubertModel's behaviour changes
-# across major versions, which would alter the backbone-swap comparison.
+# Packages whose version affects results are pinned exactly; transformers in
+# particular changes HubertModel's behaviour across major versions.
 
-torch>=2.5.0
-torchaudio>=2.5.0
-tensorflow==2.20.0   # LU-Net (reviewer7_denoiser_benchmark) only -- Keras/TF model, not PyTorch.
-                     # Pinned (unlike the original PAPER_REVISIONS/reviewer7_denoiser_benchmark/
-                     # requirements.txt, which leaves this unpinned) because an unpinned
-                     # tensorflow combined with numpy<2.0.0 below sends pip's resolver into
-                     # multi-minute backtracking across keras/ml_dtypes/h5py version
-                     # combinations on a fresh install -- confirmed directly, not assumed.
-                     # 2.20.0 is confirmed compatible with numpy<2.0.0 (requires numpy>=1.26.0).
-tf-keras==2.20.1     # legacy Keras-2 compat, needed to load LU-Net's pre-Keras-3 .h5 checkpoint;
-                     # pinned to the release matching tensorflow==2.20.0 above.
+torch>=2.6.0
+torchaudio>=2.6.0
+tensorflow==2.20.0   # LU-Net denoiser only (Keras model). Pinned so pip resolves quickly with numpy<2.
+tf-keras==2.20.1     # loads LU-Net's Keras 2 .h5 checkpoint; matches tensorflow 2.20.0
 transformers==4.57.3
 huggingface_hub==0.36.0
 safetensors==0.7.0
 librosa==0.11.0
-# numpy<2.0.0 matches the Python 3.11 cloud training container this package's
-# checked-in results were produced on. On Python 3.13, tensorflow's own
-# ml-dtypes dependency requires numpy>=2.1.0 -- confirmed via a real `pip
-# install --dry-run` ResolutionImpossible error, not assumed -- making
-# numpy<2.0.0 unsatisfiable there. Split by python_version so a fresh
-# Python 3.13 install can still succeed rather than failing outright.
+# The results were produced with numpy<2 on Python 3.11. tensorflow requires
+# numpy>=2.1 on Python 3.13, so the constraint is split by Python version.
 numpy<2.0.0; python_version < "3.13"
 numpy; python_version >= "3.13"
 pandas
@@ -35,8 +23,7 @@ soundfile
 tqdm
 requests
 matplotlib>=3.7.0   # src/figures/regenerate_fig3_unfrozen.py
-# google-cloud-storage   # optional: only for the --gcs_bucket cloud-execution path,
-#                        # imported lazily so local runs do not need it
+# google-cloud-storage   # optional, only for the --gcs_bucket option
 PyWavelets
 scikit-image
 panns_inference==0.1.1

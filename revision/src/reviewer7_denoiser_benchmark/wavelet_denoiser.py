@@ -1,40 +1,27 @@
 """
-Classical wavelet (DWT) denoising -- Candidate 1 of the denoise-then-classify
-comparison (Reviewer #7, Comment 1).
+Wavelet (DWT) denoising, candidate 1 of the denoise-then-classify comparison
+(Reviewer #7, Comment 1).
 
-This module exposes two denoisers:
+Two denoisers:
 
-  * ``wavelet_denoise`` -- soft-threshold DWT denoising delegated to
-    ``skimage.restoration.denoise_wavelet``, i.e. a published library
-    implementation of two standard, independently published thresholding
-    rules:
+  * ``wavelet_denoise``: soft-threshold DWT denoising using
+    ``skimage.restoration.denoise_wavelet``, with one of two standard
+    threshold rules:
       - BayesShrink (Chang, Yu & Vetterli, IEEE TIP 2000, "Adaptive Wavelet
-        Thresholding for Image Denoising and Compression"): a per-subband
-        threshold T = sigma^2 / sigma_signal, where sigma is estimated from
-        the finest-level detail coefficients via the median absolute
-        deviation, sigma_hat = median(|detail_coeffs|) / 0.6745.
-      - VisuShrink (Donoho & Johnstone, 1994): a single universal threshold
-        tau = sigma * sqrt(2 * log(N)) applied to every detail coefficient.
+        Thresholding for Image Denoising and Compression"): per-subband
+        threshold T = sigma^2 / sigma_signal, with sigma estimated from the
+        finest-level detail coefficients by the median absolute deviation,
+        sigma_hat = median(|detail_coeffs|) / 0.6745.
+      - VisuShrink (Donoho & Johnstone, 1994): universal threshold
+        tau = sigma * sqrt(2 * log(N)) for all detail coefficients.
 
-    Both rules are used with the standard literature default parameters.
-    Nothing here -- wavelet family, decomposition depth, thresholding mode or
-    noise-estimation rule -- was tuned against this paper's own heart-sound
-    data. That is a deliberate methodological commitment: this candidate is
-    meant to be a training-free, fully deterministic, untuned reference
-    point, with no possibility of information leaking from the evaluation
-    corpora into the denoiser. Calling the library implementation rather than
-    re-deriving the threshold arithmetic keeps the numbers identical to the
-    widely cited reference implementation.
+    Default library parameters are used. The wavelet, depth, threshold mode
+    and noise estimator were not tuned on our data, so this baseline needs
+    no training and is deterministic. It is applied to 1-D waveforms.
 
-    ``denoise_wavelet`` is dimension-agnostic (it decomposes whatever array
-    shape it is given via ``pywt.wavedecn``); it is used here on plain 1-D
-    waveforms, matching the 1-D DWT convention used for PCG/ECG signals in
-    the denoising literature.
-
-  * ``wavelet_denoise_level_dependent`` -- a level-dependent noise-estimation
-    variant developed for this work rather than a separately published
-    algorithm. See the section comment above that function for its
-    motivation, authorship status and a measured limitation.
+  * ``wavelet_denoise_level_dependent``: our own variant that estimates the
+    noise level separately at each decomposition level (see the comment
+    above that function). It is not a published method.
 """
 
 import numpy as np
@@ -56,28 +43,18 @@ def wavelet_denoise(wav: np.ndarray, method: str = "BayesShrink", wavelet: str =
 
     Args:
         wav: 1-D float waveform, any length.
-        method: "BayesShrink" (per-subband adaptive, the default; reported in
-            the literature as less over-smoothing than VisuShrink) or
-            "VisuShrink" (a single universal threshold, more aggressive).
-        wavelet: "db4" (Daubechies) or "sym4" (Symlet), the two families used
-            for PCG wavelet denoising in the cited literature.
-        wavelet_levels: decomposition depth. ``None`` keeps skimage's own
-            signal-length-dependent auto-selection, which is a documented and
-            tested library behaviour; the PCG literature does not converge on
-            a single universal level count, so no hand-picked value is
-            imposed here.
+        method: "BayesShrink" (per-subband, default; smooths less) or
+            "VisuShrink" (single universal threshold, more aggressive).
+        wavelet: "db4" (Daubechies) or "sym4" (Symlet), both common for PCG.
+        wavelet_levels: decomposition depth. ``None`` uses skimage's default,
+            which depends on signal length.
 
     Returns:
-        Denoised 1-D waveform (float32) of the same length as the input,
-        rescaled to unit peak if the reconstruction exceeds 1.0. DWT
-        reconstruction can overshoot slightly at sharp transients; the
-        rescaling is the same clip-avoidance convention used by the RMS
-        mixing code elsewhere in this package.
+        Denoised float32 waveform of the same length, rescaled to unit peak
+        if the reconstruction exceeds 1.0 (DWT can overshoot slightly at
+        sharp transients).
 
-    Near-silent input (peak < 1e-8) is returned unchanged: the MAD-based
-    noise-sigma estimate is undefined for an all-zero signal (every wavelet
-    coefficient is zero, so BayesShrink's sigma^2 / sigma_signal becomes 0/0),
-    and there is nothing to denoise in silence anyway.
+    Near-silent input (peak < 1e-8) is returned unchanged.
     """
     if method not in VALID_METHODS:
         raise ValueError(f"method must be one of {VALID_METHODS}, got {method!r}")
@@ -86,12 +63,9 @@ def wavelet_denoise(wav: np.ndarray, method: str = "BayesShrink", wavelet: str =
 
     wav = np.asarray(wav, dtype=np.float64)
 
-    # Degenerate-input guard. For an all-zero (or numerically silent) input
-    # every wavelet coefficient is zero, so BayesShrink's
-    # T = sigma^2 / sigma_signal is a genuine 0/0 and yields NaN. The
-    # surrounding pipeline can produce such a buffer (a failed audio load
-    # falls back to zeros), and a single NaN probability would corrupt the
-    # AUROC/F1 of the whole evaluation batch, so silence is returned as-is.
+    # For silent input all coefficients are zero and the BayesShrink
+    # threshold is 0/0 (NaN). Failed audio loads fall back to zeros, so
+    # return silence unchanged.
     if np.max(np.abs(wav)) < 1e-8:
         return wav.astype(np.float32)
 
@@ -106,68 +80,39 @@ def wavelet_denoise(wav: np.ndarray, method: str = "BayesShrink", wavelet: str =
 
 
 # ---------------------------------------------------------------------------
-# Level-dependent noise estimation -- an extension developed for this work.
-# It is an additional evaluation arm alongside wavelet_denoise() above, not a
-# replacement for it.
+# Level-dependent noise estimation (our own variant, used as an extra
+# condition next to wavelet_denoise()). It is not a published method.
 #
-# AUTHORSHIP. Unlike wavelet_denoise(), which is a direct call into a
-# peer-reviewed library's implementation of two independently published
-# thresholding rules, the function below is this work's own variant. It
-# carries none of the external validation that BayesShrink, VisuShrink or
-# LU-Net do, and must be reported as an extension developed here rather than
-# as a published baseline method.
-#
-# MOTIVATION. skimage's thresholding routine
-# (skimage.restoration._denoise._wavelet_threshold) estimates the noise sigma
-# once, globally, from only the finest wavelet decomposition level's detail
-# coefficients, and then reuses that single value for every coarser level's
-# threshold -- for both BayesShrink and VisuShrink. That is the correct
-# convention for i.i.d. white Gaussian noise, whose energy is roughly uniform
-# across scales. The composite interference used in this paper (lung sounds +
-# 0.5x environmental sounds) is not concentrated at the finest scale: it has
-# real structure across coarse and mid-frequency subbands, which is also
-# where it overlaps the heart signal. A finest-scale-only estimate therefore
-# systematically underestimates the noise level at coarser scales, which end
-# up barely thresholded at all. This is the mechanism behind the observation
-# that wavelet_denoise() is close to a no-op on real PCG audio (see
+# skimage (skimage.restoration._denoise._wavelet_threshold) estimates sigma
+# once, from the finest-level detail coefficients, and uses it at every level
+# for both BayesShrink and VisuShrink. That suits white noise, but our
+# lung + environmental noise also has energy at coarser scales, where it
+# overlaps the heart sound, so those levels are barely thresholded. This is
+# why wavelet_denoise() changes real PCG audio very little (see
 # ../../README.md).
 #
-# APPROACH. Estimate sigma separately at each decomposition level, using the
-# same MAD-based Gaussian estimator skimage uses internally (Donoho &
-# Johnstone 1994, Biometrika 81(3):425-455, sec. 4.2), then apply the
-# BayesShrink/VisuShrink threshold formulas per level with that level's own
-# local sigma. The estimator is reproduced here only because skimage's public
-# denoise_wavelet() API exposes no per-level sigma control. Scale-adaptive
-# noise estimation for correlated or non-stationary noise is a known general
-# technique in the wavelet denoising literature (e.g. Johnstone & Silverman
-# on threshold estimators for correlated noise); the particular combination
-# used here is ours. As with wavelet_denoise(), no parameter was selected by
-# examining performance on this paper's PCG, lung-sound or environmental
-# audio: the variant was developed and checked against synthetic, non-PCG
-# test signals only (see test_denoiser_benchmark.py).
+# Here sigma is estimated separately at each level with the same MAD
+# estimator (Donoho & Johnstone 1994, Biometrika 81(3):425-455, sec. 4.2), and
+# the BayesShrink/VisuShrink thresholds use that level's sigma. skimage's
+# public API has no per-level option, so the estimator is reimplemented.
+# Level-dependent thresholds for correlated noise are a known idea (e.g.
+# Johnstone & Silverman); this particular combination is ours. Parameters
+# were not tuned on our data; the variant was only checked on synthetic
+# signals (test_denoiser_benchmark.py).
 #
-# MEASURED LIMITATION. On genuinely clean, noise-free heart-sound recordings
-# this variant still removes a measurable fraction of the signal's own energy
-# -- roughly 2-13% across sampled CirCor files, versus about 0% for the
-# global-sigma version -- and correspondingly lowers classification AUROC at
-# lambda = 0.0, where there is no noise to remove at all. Mechanism: per-level
-# estimation implicitly assumes most of the energy at every scale is noise,
-# which holds for sparse or simple signals but not for heart sounds. S1/S2 are
-# broadband transients that populate detail coefficients across many scales,
-# including the coarse ones where the heart sound's own low-frequency
-# structure lives, so the per-level estimate cannot separate "coarse-scale
-# energy because of noise" from "coarse-scale energy because of a real S1/S2
-# transient" and attenuates both. Any result from this condition should be
-# reported together with this signal-degradation effect.
+# Limitation: on clean heart recordings this variant removes about 2-13% of
+# the signal energy (versus about 0% for wavelet_denoise()) and lowers AUROC
+# at lambda = 0.0. S1/S2 are broadband transients with energy at many scales,
+# so per-level estimates treat part of the heart sound as noise. Results for
+# this condition should be reported with this caveat.
 # ---------------------------------------------------------------------------
 
 def _sigma_est_level(detail_coeffs: np.ndarray) -> float:
     """MAD-based Gaussian noise sigma estimate for one decomposition level.
 
-    Same formula as skimage.restoration._denoise._sigma_est_dwt, but called
-    once per decomposition level instead of once globally on the finest
-    level only. Zero coefficients are excluded from the median, as skimage
-    does; an all-zero level yields sigma = 0 (no thresholding).
+    Same formula as skimage.restoration._denoise._sigma_est_dwt, applied to
+    one level. Zero coefficients are excluded, as in skimage; an all-zero
+    level gives sigma = 0 (no thresholding).
     """
     coeffs = detail_coeffs[np.nonzero(detail_coeffs)]
     if coeffs.size == 0:
@@ -178,10 +123,9 @@ def _sigma_est_level(detail_coeffs: np.ndarray) -> float:
 def _bayes_thresh_level(level_coeffs: np.ndarray, var: float) -> float:
     """BayesShrink threshold for one decomposition level.
 
-    Same formula as skimage.restoration._denoise._bayes_thresh --
-    threshold = var / sqrt(max(signal_var - var, eps)), i.e. Chang, Yu &
-    Vetterli's T = sigma^2 / sigma_signal -- but evaluated with this level's
-    own noise variance `var` instead of a shared global one.
+    Same formula as skimage.restoration._denoise._bayes_thresh,
+    threshold = var / sqrt(max(signal_var - var, eps)) (T = sigma^2 /
+    sigma_signal), with this level's noise variance `var`.
     """
     dvar = np.mean(level_coeffs.astype(np.float64) ** 2)
     eps = np.finfo(np.float64).eps
@@ -190,13 +134,9 @@ def _bayes_thresh_level(level_coeffs: np.ndarray, var: float) -> float:
 
 def wavelet_denoise_level_dependent(wav: np.ndarray, method: str = "BayesShrink",
                                      wavelet: str = "db4", wavelet_levels: int = None) -> np.ndarray:
-    """Level-dependent BayesShrink/VisuShrink (this work's own variant).
+    """Level-dependent BayesShrink/VisuShrink (our variant, see above).
 
-    See the section comment above for the motivation, authorship status and
-    measured limitation. Arguments, near-silence guard and peak-rescaling
-    behaviour are identical to wavelet_denoise(), so the two denoisers are
-    interchangeable as `--conditions` arms in run_denoiser_benchmark_cv.py
-    with no other code changes.
+    Same arguments, silence handling and peak rescaling as wavelet_denoise().
     """
     if method not in VALID_METHODS:
         raise ValueError(f"method must be one of {VALID_METHODS}, got {method!r}")
@@ -208,10 +148,8 @@ def wavelet_denoise_level_dependent(wav: np.ndarray, method: str = "BayesShrink"
         return wav.astype(np.float32)
 
     if wavelet_levels is None:
-        # Reproduces skimage's default depth ("maximum level minus 3"), so
-        # that this variant and wavelet_denoise() differ only in the one
-        # mechanism under test -- per-level versus global noise estimation --
-        # and not also in decomposition depth.
+        # skimage's default depth (max level - 3), so the only difference from
+        # wavelet_denoise() is per-level vs global sigma.
         wavelet_levels = max(pywt.dwt_max_level(len(wav), wavelet) - 3, 1)
 
     coeffs = pywt.wavedec(wav, wavelet=wavelet, level=wavelet_levels)
@@ -225,9 +163,8 @@ def wavelet_denoise_level_dependent(wav: np.ndarray, method: str = "BayesShrink"
         if method == "BayesShrink":
             thresh = _bayes_thresh_level(level_coeffs, var)
         else:
-            # VisuShrink: universal threshold evaluated with this level's own
-            # sigma. N is the whole signal length, not the level's
-            # coefficient count, matching skimage's _universal_thresh().
+            # VisuShrink with this level's sigma. N is the signal length, as
+            # in skimage's _universal_thresh().
             thresh = sigma * np.sqrt(2 * np.log(len(wav)))
         denoised_details.append(pywt.threshold(level_coeffs, value=thresh, mode="soft"))
 
@@ -241,8 +178,8 @@ def wavelet_denoise_level_dependent(wav: np.ndarray, method: str = "BayesShrink"
 
 
 if __name__ == "__main__":
-    # Quick self-check: every (method, wavelet) pair should reduce the
-    # distance to a known clean signal on synthetic sine + white noise.
+    # Quick self-check: each (method, wavelet) pair should lower the MSE on a
+    # synthetic sine + white noise.
     rng = np.random.default_rng(0)
     t = np.linspace(0, 10, 160000)
     clean = 0.3 * np.sin(2 * np.pi * 2 * t)

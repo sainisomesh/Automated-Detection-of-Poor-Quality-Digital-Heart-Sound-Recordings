@@ -1,12 +1,10 @@
 """
-Behavioural sanity checks for giordano_snr.py, in the same style as
-test_tang_features.py.
+Sanity checks for giordano_snr.py on synthetic signals.
 
-Verifies on synthetic signals that cycle-duration estimation recovers a known
-heart period, that a clean synthetic PCG scores a high SNR while broadband
-noise scores much lower, that the score decreases monotonically as more
-RMS-matched noise is mixed in, and that degenerate inputs (silence, a signal
-shorter than one cycle) are handled without raising.
+Checks that cycle-duration estimation recovers a known heart period, that a
+clean synthetic PCG scores a high SNR while broadband noise scores much lower,
+that the score drops as more RMS-matched noise is mixed in, and that
+degenerate inputs (silence, a signal shorter than one cycle) don't raise.
 
 Exits non-zero if any check fails.
 
@@ -21,9 +19,9 @@ rng = np.random.default_rng(42)
 
 
 def check(name, cond, detail=""):
-    """Report one check and return its outcome, for accumulation by main()."""
+    """Print one check result and return it."""
     status = "PASS" if cond else "FAIL"
-    print(f"[{status}] {name}" + (f" -- {detail}" if detail else ""))
+    print(f"[{status}] {name}" + (f": {detail}" if detail else ""))
     return cond
 
 
@@ -66,8 +64,7 @@ def main():
         f"noise={snr_noise:.2f} dB vs clean={snr_clean:.2f} dB",
     )
 
-    # Monotonicity: mixing in progressively more RMS-matched noise, using the
-    # same formula as the CV pipeline's mix_rms, should lower the SNR score.
+    # More RMS-matched noise (same formula as mix_rms) should lower the SNR.
     heart, _ = make_heartbeat(FS, noise_std=0.02)
     noise_source = rng.normal(0, 1, len(heart))
     rms_h = np.sqrt(np.mean(heart ** 2))
@@ -88,7 +85,7 @@ def main():
         f"snrs={[round(s,2) for s in snrs_by_lambda]}",
     )
 
-    # Degenerate inputs must return a value rather than raise.
+    # Degenerate inputs should return a value, not raise.
     try:
         s = compute_snr_db(np.zeros(1000), FS)
         all_ok &= check("all-zero signal doesn't crash", np.isfinite(s) or s == -np.inf, f"got {s}")

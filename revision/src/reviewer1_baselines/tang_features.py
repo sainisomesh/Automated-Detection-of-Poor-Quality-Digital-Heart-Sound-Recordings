@@ -8,30 +8,25 @@ sound signal-quality feature set:
 
 Ported from the authors' released source:
   https://github.com/tanghongdlut/signal-quality-assessment-of-heart-sound-signal
-Each function below names the specific .m file it corresponds to. All numeric
-constants (window lengths, filter cutoffs, sample-entropy m/r, cycle-frequency
-band) are taken from that published code rather than re-derived, and should not
-be altered without breaking correspondence with the original method.
+Each function names the .m file it corresponds to. Numeric constants (window
+lengths, filter cutoffs, sample-entropy m/r, cycle-frequency band) are taken
+from that code.
 
 `extract_features` returns the 10 published features in their original order
 (see FEATURE_NAMES at the bottom of this module).
 
-Sampling rate: the original preprocessing operates at a fixed rate chosen at
-feature-extraction time, and the published features were computed at
-fs = 1000 Hz ("down sampled to 1000 Hz" in the paper). Callers are therefore
-expected to resample to 1000 Hz before calling `pre_processing` /
-`extract_features`.
+Sampling rate: the published features were computed at fs = 1000 Hz ("down
+sampled to 1000 Hz" in the paper), so callers should resample to 1000 Hz
+before calling `pre_processing` / `extract_features`.
 
-Two documented departures from bit-exact equivalence with the MATLAB code are
-described inline: the Welch segmentation in `get_energy_ratio` and the
-resampling method in `_resample_poly_like`.
+Two differences from the MATLAB code are described inline: the Welch
+segmentation in `get_energy_ratio` and the resampling in `_resample_poly_like`.
 """
 
 import numpy as np
 from scipy.signal import butter, filtfilt, welch, stft, czt
 
 
-# ── remove_spike.m ──────────────────────────────────────────────────────
 def remove_spike(x: np.ndarray) -> np.ndarray:
     """Spike removal (remove_spike.m).
 
@@ -61,7 +56,6 @@ def remove_spike(x: np.ndarray) -> np.ndarray:
     return x
 
 
-# ── pre_processing.m ────────────────────────────────────────────────────
 def pre_processing(input_signal: np.ndarray, fs: float) -> np.ndarray:
     """Signal conditioning applied before feature extraction (pre_processing.m).
 
@@ -81,7 +75,6 @@ def pre_processing(input_signal: np.ndarray, fs: float) -> np.ndarray:
     return x
 
 
-# ── getEnvelopeFromSTFT.m ───────────────────────────────────────────────
 def get_envelope_from_stft(phs: np.ndarray, fs: float) -> np.ndarray:
     """Amplitude envelope from the short-time Fourier transform
     (getEnvelopeFromSTFT.m).
@@ -110,7 +103,6 @@ def get_envelope_from_stft(phs: np.ndarray, fs: float) -> np.ndarray:
     return remove_spike(ins_fre)
 
 
-# ── getkurtosis.m ───────────────────────────────────────────────────────
 def get_kurtosis(x: np.ndarray) -> float:
     """Kurtosis as defined in getkurtosis.m.
 
@@ -125,34 +117,28 @@ def get_kurtosis(x: np.ndarray) -> float:
     return float(k1 / (k2 ** 2 + eps))
 
 
-# ── getEnergyRatio.m ────────────────────────────────────────────────────
 def get_energy_ratio(x: np.ndarray, fre: tuple, fs: float) -> float:
     """Fraction of spectral energy inside a frequency band (getEnergyRatio.m).
 
     Estimates the power spectral density with Welch's method at
-    nfft = round(fs) -- i.e. 1 Hz per bin, which is what makes the method's
-    fixed Hz band edges directly addressable -- and returns the PSD mass in
-    [fre[0], fre[1]] Hz divided by the total PSD mass.
+    nfft = round(fs) (1 Hz per bin, so the band edges in Hz map directly to
+    bins) and returns the PSD mass in [fre[0], fre[1]] Hz divided by the total
+    PSD mass.
 
     Parameters
     ----------
     fre : tuple
         (low, high) band edges in Hz, inclusive.
 
-    Segmentation deviation
+    Difference from MATLAB
     ----------------------
-    MATLAB's `pwelch` with default window/overlap splits the signal into 8
-    Hamming-windowed segments at 50% overlap, i.e. nperseg = N/4.5 (the
-    formula retained below). For the fixed 10 s @ 1000 Hz inputs used here
-    (N = 10000) that gives nperseg = 2222, which exceeds nfft = 1000; scipy's
-    `welch` does not accept nperseg > nfft. nperseg is therefore capped at
-    nfft, so the effective segmentation for these inputs is nperseg = 1000 /
-    noverlap = 500, i.e. roughly 19 segments at 50% overlap rather than 8.
-
-    The Hamming window, the 50% overlap fraction, and nfft = fs are unchanged.
-    The cap is applied identically to every recording irrespective of label,
-    noise level, or fold, and averaging over more segments at the same overlap
-    fraction yields an equally or more stable PSD estimate.
+    MATLAB's `pwelch` with default settings uses 8 Hamming-windowed segments
+    at 50% overlap, i.e. nperseg = N/4.5 (the formula kept below). For our
+    10 s @ 1000 Hz inputs (N = 10000) that gives nperseg = 2222 > nfft = 1000,
+    which scipy's `welch` does not accept. nperseg is capped at nfft, giving
+    nperseg = 1000 / noverlap = 500, about 19 segments instead of 8. The
+    Hamming window, 50% overlap and nfft = fs are unchanged, and the cap is the
+    same for every recording.
     """
     x = np.asarray(x, dtype=np.float64)
     nfft = int(round(fs))
@@ -168,7 +154,6 @@ def get_energy_ratio(x: np.ndarray, fre: tuple, fs: float) -> float:
     return float(np.sum(px[ind]) / (np.sum(px) + eps))
 
 
-# ── getMaxAxcorCoef.m ───────────────────────────────────────────────────
 def get_max_axcor_coef(x_single_side: np.ndarray, fs: float) -> float:
     """Peak autocorrelation coefficient in the cardiac-cycle lag range
     (getMaxAxcorCoef.m).
@@ -187,7 +172,6 @@ def get_max_axcor_coef(x_single_side: np.ndarray, fs: float) -> float:
     return float(np.max(x_single_side[start:end]))
 
 
-# ── getSampEn_fast.m ────────────────────────────────────────────────────
 def get_sampen_fast(x: np.ndarray, m: int = 2, r: float = 0.2) -> float:
     """Sample entropy (getSampEn_fast.m; Richman & Moorman, 2000).
 
@@ -204,10 +188,8 @@ def get_sampen_fast(x: np.ndarray, m: int = 2, r: float = 0.2) -> float:
         Similarity tolerance, in units of the z-scored signal's standard
         deviation.
 
-    The input is z-scored internally, mirroring the MATLAB implementation; any
-    normalization already applied by the caller is therefore redundant but
-    harmless. Degenerate cases (constant signal, signal shorter than m+1, no
-    matching pairs) return 0.0.
+    The input is z-scored internally, as in the MATLAB code. Degenerate cases
+    (constant signal, signal shorter than m+1, no matching pairs) return 0.0.
     """
     x = np.asarray(x, dtype=np.float64).flatten()
     std = np.std(x)
@@ -242,7 +224,6 @@ def get_sampen_fast(x: np.ndarray, m: int = 2, r: float = 0.2) -> float:
     return float(-np.log(ca / cm))
 
 
-# ── fast_cfs.m / getDegree_cycle.m ──────────────────────────────────────
 def get_degree_cycle(rx: np.ndarray, min_cf: float, max_cf: float, fs: float,
                       M: int = 200) -> float:
     """Degree of periodicity from cyclostationary analysis
@@ -284,7 +265,6 @@ def get_degree_cycle(rx: np.ndarray, min_cf: float, max_cf: float, fs: float,
     return float(np.max(cfs) / med)
 
 
-# ── get_features_Tang.m ─────────────────────────────────────────────────
 def extract_features(phs: np.ndarray, fs: float) -> np.ndarray:
     """Compute the 10 Tang et al. quality features (get_features_Tang.m).
 
@@ -358,18 +338,10 @@ def extract_features(phs: np.ndarray, fs: float) -> np.ndarray:
 def _resample_poly_like(x: np.ndarray, fs_new: float, fs_old: float, n_out: int) -> np.ndarray:
     """Downsample `x` from `fs_old` to `fs_new` Hz, producing `n_out` samples.
 
-    Approximation rather than an exact equivalent of MATLAB's `resample`:
-    MATLAB applies a polyphase FIR anti-aliasing filter suited to
-    non-periodic signals, whereas scipy.signal.resample is FFT-based and
-    implicitly treats the input as periodic, which can introduce Gibbs-type
-    edge artifacts.
-
-    Only the two sample-entropy features (8 and 9) go through this path, and
-    they are z-scored pattern-matching statistics rather than
-    amplitude-sensitive ones, which limits but does not remove sensitivity to
-    the difference. The same resampling is applied to every recording
-    irrespective of label or noise level, so it affects fidelity to the
-    original MATLAB feature values rather than the balance of any comparison.
+    Approximates MATLAB's `resample`, which uses a polyphase FIR anti-aliasing
+    filter. scipy.signal.resample is FFT-based and treats the input as
+    periodic, so it can add edge artifacts. Only the two sample-entropy
+    features (8 and 9) use this, and both are computed on z-scored signals.
     """
     from scipy.signal import resample
     return resample(x, n_out)

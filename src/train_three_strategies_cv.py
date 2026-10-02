@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Three Training Strategies — 10-Fold Cross-Validation.
+Three training strategies, 10-fold cross-validation (Figure 3).
 
-Compares three noise-aware training approaches for AST heart quality detection,
+Compares three training approaches for AST heart quality detection,
 each evaluated across 10 noise test levels (λ):
 
   1. clean:      Trained on clean heart sounds only (no noise added)
@@ -263,7 +263,7 @@ def evaluate_model(model, hearts, icbhi, env, processor, device, batch_size=16):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Three Training Strategies — 10-Fold CV")
+    parser = argparse.ArgumentParser(description="Three training strategies, 10-fold CV")
     parser.add_argument("--data_dir", type=str, required=True, help="Root directory containing dataset/")
     parser.add_argument("--output_dir", type=str, required=True, help="Output directory for results")
     parser.add_argument("--n_folds", type=int, default=10)
@@ -347,7 +347,7 @@ def main():
             with open(os.path.join(args.output_dir, "partial_results.json"), 'w') as f:
                 json.dump(all_fold_results, f, indent=2)
 
-    # Final aggregation
+    # Normal-approximation CIs; compute_metrics.py gives the Student's t CIs
     final_results = {}
     for s_name in strategies:
         final_results[s_name] = {}

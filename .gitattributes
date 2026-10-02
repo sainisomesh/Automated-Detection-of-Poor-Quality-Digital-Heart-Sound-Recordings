@@ -1,0 +1,3 @@
+# Keep shell scripts LF on Windows checkouts so bash can run them.
+*.sh text eol=lf
+*.py text eol=lf

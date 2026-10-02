@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
 """
 Giordano, Rosati & Knaflitz (2021) SNR-based PCG quality baseline, evaluated
-under the same patient-level cross-validation and noise-mixing protocol as
-AST-QA and the Tang et al. baseline. The shared audio pipeline is documented
-in train_tang_baseline_cv.py and cloned here.
+with the same patient-level cross-validation and noise-mixing protocol as
+AST-QA and the Tang et al. baseline. The audio pipeline is the same as in
+train_tang_baseline_cv.py.
 
-Unlike Tang et al. and AST-QA, the original method is not a trained
-classifier: it is a single SNR formula compared against a fixed threshold.
-It is fitted into the same train/test discipline as follows:
+The original method is a single SNR score compared against a threshold, not a
+trained classifier. It is evaluated as follows:
 
-- The per-recording SNR score (`giordano_snr.compute_snr_db`) is computed
-  identically for training and test recordings.
-- The decision threshold used for accuracy, F1, sensitivity, and specificity
-  is selected on the training fold only, by maximizing F1, and then applied
-  unchanged to the held-out fold. Test labels never influence the threshold.
-- AUROC and AUPRC require no threshold and are computed directly from the raw
-  SNR score, which is the most faithful evaluation of a pure scoring rule.
+- The per-recording SNR score (`giordano_snr.compute_snr_db`) is computed the
+  same way for training and test recordings.
+- The threshold for accuracy, F1, sensitivity and specificity is chosen on
+  the training fold by maximizing F1, then applied to the held-out fold.
+- AUROC and AUPRC are computed directly from the raw SNR score.
 
-See giordano_snr.py for the documented deviation in cardiac-cycle
-segmentation: the original method uses R-peaks from a synchronized ECG, which
-these PCG-only datasets do not provide.
+See giordano_snr.py for the change to cardiac-cycle segmentation (the
+original method uses R-peaks from a synchronized ECG, which our PCG-only
+datasets do not have).
 
 Usage:
     python train_giordano_baseline_cv.py --data_dir ../../../dataset/ \\
@@ -58,11 +55,8 @@ def set_seed(seed):
     np.random.seed(seed)
 
 
-# ── Shared audio pipeline ───────────────────────────────────────────────
-# Mirrors train_tang_baseline_cv.py and ../../../src/train_per_lambda_cv.py so
-# that all three methods see exactly the same audio; see
-# train_tang_baseline_cv.py for the per-function documentation. Any change
-# here must be mirrored in those scripts, and vice versa.
+# Audio pipeline: same as train_tang_baseline_cv.py and
+# ../../../src/train_per_lambda_cv.py (see the Tang script for docstrings).
 def load_audio(path):
     try:
         wav, _ = librosa.load(path, sr=TARGET_SR, mono=True)
@@ -114,19 +108,18 @@ def get_noise(icbhi_files, env_files, rng):
                 combined = combined / peak
             return combined
     return np.zeros(MAX_LENGTH)
-# ── End shared audio pipeline ───────────────────────────────────────────
 
 
 def _score_one(args):
     """Build one sample and return (snr_db, label, filename).
 
-    Counterpart of train_tang_baseline_cv.py's `_extract_one`, with the SNR
-    score in place of the feature vector: "mixed" samples are a heart
-    recording plus composite noise at intensity `lam` (label 1) and "noise"
-    samples are noise only (label 0). Evaluation samples use the per-sample
-    seed `random.Random(42 + seed_idx)` for a reproducible noise draw;
-    training samples draw unseeded. Returns None if the recording cannot be
-    loaded or scored.
+    Same as `_extract_one` in train_tang_baseline_cv.py, with the SNR score in
+    place of the feature vector: "mixed" samples are a heart recording plus
+    composite noise at `lam` (label 1), "noise" samples are noise only
+    (label 0). Test samples use `random.Random(42 + seed_idx)` and training
+    samples use `random.Random(train_noise_seed + seed_idx)`, with
+    `train_noise_seed` set per fold in main(). Returns None if the recording
+    cannot be loaded or scored.
     """
     kind, heart_path, icbhi_files, env_files, lam, seed_idx, is_train, train_noise_seed = args
     if kind == "mixed":
@@ -158,8 +151,8 @@ def _score_one(args):
 def build_score_set(heart_files, icbhi_files, env_files, lam, is_train, n_jobs, train_noise_seed=0):
     """Score one fold's samples: one noise-mixed positive per heart recording
     plus an equal number of noise-only negatives. `seed_idx` runs 0..N-1 over
-    the positives and N..2N-1 over the negatives so no two evaluation samples
-    share a noise draw. Returns (scores, labels, filenames).
+    the positives and N..2N-1 over the negatives so no two samples share a
+    noise draw. Returns (scores, labels, filenames).
     """
     tasks = []
     for i, hf in enumerate(heart_files):
@@ -191,9 +184,8 @@ def best_threshold_for_f1(scores, labels, max_candidates=200):
     ----------
     max_candidates : int
         Upper bound on thresholds evaluated. If the training scores have more
-        than this many distinct values, candidates are taken as evenly spaced
-        percentiles of the score distribution instead of every unique value,
-        which keeps the search linear in the number of training samples.
+        than this many distinct values, evenly spaced percentiles are used
+        instead of every unique value to keep the search cheap.
 
     Non-finite scores are excluded from the candidate set; 0.0 is returned if
     no score is finite.
@@ -218,11 +210,10 @@ def best_threshold_for_f1(scores, labels, max_candidates=200):
 
 
 def scores_to_pseudo_prob(scores, threshold, scale=5.0):
-    """Map SNR values in dB onto [0, 1] for output-format parity with the
-    other methods' `probs` column: a logistic centered on the train-derived
-    threshold, with `scale` setting its width in dB. Monotone in the raw
-    score, so it preserves ranking. The reported AUROC/AUPRC are computed
-    from the raw SNR values, not from this transform.
+    """Map SNR (dB) to [0, 1] so the output has a `probs` column like the
+    other methods: a logistic centered on the training threshold, with `scale`
+    as its width in dB. It is monotone, so ranking is preserved. Reported
+    AUROC/AUPRC use the raw SNR values.
     """
     return 1.0 / (1.0 + np.exp(-(scores - threshold) / scale))
 
@@ -285,8 +276,8 @@ def main():
     if not heart_files:
         raise ValueError(f"No heart audio files found in {args.data_dir}")
 
-    # Group recordings by patient so folds can be split at the patient level:
-    # filenames are {patient_id}_{valve}.wav, e.g. 13918_AV.wav -> 13918.
+    # Group by patient (filenames are {patient_id}_{valve}.wav, e.g.
+    # 13918_AV.wav -> 13918) so all of a patient's recordings share a fold.
     patient_map = {}
     for f in heart_files:
         pid = f.name.split('_')[0]
@@ -303,7 +294,6 @@ def main():
 
     for l_val in lambdas:
         logger.info(f"=== Starting {args.n_folds}-Fold CV for Lambda={l_val} (Giordano SNR baseline) ===")
-        # Folds are formed over patient IDs, not files.
         kf = KFold(n_splits=args.n_folds, shuffle=True, random_state=args.seed)
         lambda_metrics = []
 
@@ -311,8 +301,8 @@ def main():
             tr_hearts = [f for i in train_idx for f in patient_map[pids[i]]]
             te_hearts = [f for i in test_idx for f in patient_map[pids[i]]]
 
-            # The noise corpora are also split 80/20 per fold, so evaluation
-            # noise comes from clips never used during training.
+            # Noise corpora are split 80/20 per fold so test noise clips are
+            # never seen in training.
             rng = random.Random(args.seed + fold)
             tr_icbhi = sorted(list(icbhi_files))
             tr_env = sorted(list(env_files))
@@ -330,16 +320,15 @@ def main():
                                             train_noise_seed=1_000_000 + args.seed * 100_000 + fold * 10_000)
             test_scores, test_labels, test_filenames = build_score_set(te_hearts, te_icbhi, te_env, l_val, is_train=False, n_jobs=args.n_jobs)
 
-            # Threshold fitted on the training fold only, then frozen.
+            # Threshold chosen on the training fold only
             threshold = best_threshold_for_f1(train_scores, train_labels)
             metrics = compute_metrics(test_labels, test_scores, threshold)
             metrics["learned_threshold_db"] = threshold
             lambda_metrics.append(metrics)
             logger.info(f"  Fold {fold + 1}: AUROC={metrics['auroc']:.4f} F1={metrics['f1']:.4f} thresh={threshold:.2f}dB")
 
-            # Raw per-sample held-out predictions, saved alongside the
-            # aggregated metrics. Both the raw SNR in dB and its bounded
-            # transform are written; downstream comparisons use `probs`.
+            # Raw per-sample predictions: SNR in dB and its [0, 1] transform.
+            # The paired significance script reads `probs`.
             preds_dir = os.path.join(args.output_dir, "raw_predictions", f"lambda_{l_val}", f"fold_{fold + 1}")
             os.makedirs(preds_dir, exist_ok=True)
             pseudo_prob = scores_to_pseudo_prob(test_scores, threshold)
@@ -348,8 +337,7 @@ def main():
                 "snr_db": test_scores, "probs": pseudo_prob,
             }).to_csv(os.path.join(preds_dir, "predictions.csv"), index=False)
 
-        # Fold-level aggregation. The reported half-widths are normal-
-        # approximation 95% intervals (1.96 * SD / sqrt(n_folds)) over folds.
+        # Normal-approximation 95% CI half-widths over folds (1.96 * SD / sqrt(n_folds))
         avg_auroc = float(np.mean([m['auroc'] for m in lambda_metrics]))
         ci_auroc = float(1.96 * np.std([m['auroc'] for m in lambda_metrics]) / np.sqrt(args.n_folds))
         avg_f1 = float(np.mean([m['f1'] for m in lambda_metrics]))

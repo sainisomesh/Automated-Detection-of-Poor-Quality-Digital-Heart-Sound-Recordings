@@ -1,45 +1,22 @@
 #!/usr/bin/env python3
 """
-Paired bootstrap significance: AST versus PANNs CNN14, YAMNet and HuBERT,
-compared within each unfreezing mode (frozen against frozen, fully fine-tuned
-against fully fine-tuned) under the identical variable-noise training
-protocol.
+Paired bootstrap significance tests: AST versus PANNs CNN14, YAMNet and
+HuBERT, within each unfreezing mode (frozen vs frozen, fully fine-tuned vs
+fully fine-tuned), all trained with variable noise and evaluated with 5-fold
+patient-level CV.
 
-How this differs from compute_significance_vs_ast.py
-----------------------------------------------------
-compute_significance_vs_ast.py compares each backbone against the
-originally published, frozen, 10-fold AST-QA noise_0_10 model. That
-comparison is necessarily unpaired -- the two sides have different fold
-counts, and only part of the published model's raw per-fold CSVs survives --
-and its own docstring documents those limitations. It is kept as the
-comparison against the published model, and its output
-(results/reviewer7_backbone_swap/significance_vs_ast_qa.json) is independent
-of this script.
+The AST reference is the 5-fold runs of the unfreezing ablation
+(../reviewer1_unfreezing_ablation/, directories frozen_5fold/ and
+full_5fold_variable/). That experiment and this one build folds the same way
+(same sorted patient and noise file lists, seed, KFold split and per-index
+noise seeding), so row i of a lambda/fold CSV is the same test case on both
+sides. merged_fold() checks row counts, basenames and labels before pairing.
+Same approach as ../reviewer1_baselines/compute_significance_paired.py.
 
-This script instead uses the AST runs from
-../reviewer1_unfreezing_ablation/ as the reference, which is the same AST
-comparator cited in the manuscript's backbone-comparison table. Because that
-experiment and this one build their folds identically -- the same sorted
-patient and noise file lists, the same seed, the same KFold construction, and
-the same per-index noise seeding for the evaluation sets -- row i of a given
-lambda/fold CSV is the same test case on both sides. merged_fold() asserts
-that row counts, test-file basenames and labels agree position by position
-before pairing, so the pairing is checked at runtime rather than assumed.
-This is the same approach as
-../reviewer1_baselines/compute_significance_paired.py.
-
-Pairing enables a paired bootstrap (resample test cases once and score both
-models on the same resample) and a paired t-test over per-fold AUROCs, which
-removes between-fold variance from the comparison. Note that the t-test is
-computed over N_FOLDS observations, so its power is limited; the bootstrap
-interval over pooled test cases is the primary statistic.
-
-Both sides must have been run with the same fold count, which N_FOLDS below
-fixes; see ../../README.md for the fold counts of the checked-in results. The
-AST side reuses the unfreezing ablation's own 5-fold results
-(frozen_5fold/, full_5fold_variable/) rather than a separate run, since that
-experiment already trains AST under the same variable-noise protocol at the
-same fold count.
+For each lambda we report a paired bootstrap of the pooled AUROC difference
+(resample test cases once, score both models on the same resample) and a
+paired t-test over per-fold AUROCs. The t-test has only N_FOLDS observations,
+so the bootstrap interval is the main statistic.
 
 Writes results/reviewer7_backbone_swap/significance_full_paired.json.
 
@@ -55,9 +32,7 @@ import pandas as pd
 from scipy import stats
 from sklearn.metrics import roc_auc_score
 
-# Inputs and outputs are resolved relative to this file's location
-# (reproducibility/revision/src/reviewer7_backbone_swap/), so the script can be
-# run from any working directory.
+# Paths are relative to this file, so the script runs from any directory.
 REVISION_ROOT = Path(__file__).resolve().parents[2]
 ABLATION_DIR = REVISION_ROOT / "results" / "reviewer1_unfreezing_ablation"
 BACKBONE_DIR = REVISION_ROOT / "results" / "reviewer7_backbone_swap"
@@ -68,26 +43,23 @@ N_FOLDS = 5
 B = 1000
 SEED = 42
 
-# Result directory for each backbone in each mode: frozen-mode runs use the
-# bare backbone name, fully fine-tuned runs carry a "_full" suffix.
+# Result directory per backbone and mode ("_full" = fully fine-tuned).
 BACKBONES = {
     "panns": {"frozen": "panns", "full": "panns_full"},
     "yamnet": {"frozen": "yamnet", "full": "yamnet_full"},
     "hubert": {"frozen": "hubert", "full": "hubert_full"},
 }
 
-# The unfreezing ablation keeps one directory per training strategy, not just
-# per unfreezing mode, so "full" is not simply "full_5fold": full_5fold_variable
-# is the one trained with this experiment's own variable-noise protocol.
+# AST runs from the unfreezing ablation. For full fine-tuning we use
+# full_5fold_variable, the run trained with variable noise like the backbones.
 ABLATION_MODE_DIRS = {"frozen": "frozen_5fold", "full": "full_5fold_variable"}
 
 
 def load_fold(base_dir: Path, lam: float, fold: int) -> pd.DataFrame:
     """Load one method's raw predictions for a single (lambda, fold).
 
-    Positives are reduced to their file basename so that the two experiments
-    can be aligned even though they recorded different absolute paths;
-    negatives are already the literal string "noise" and are left as is.
+    Positive filenames are reduced to basenames because the two experiments
+    recorded different absolute paths. Negatives are stored as "noise".
     """
     csv_path = base_dir / f"lambda_{lam}" / f"fold_{fold}" / "predictions.csv"
     df = pd.read_csv(csv_path)
@@ -98,11 +70,9 @@ def load_fold(base_dir: Path, lam: float, fold: int) -> pd.DataFrame:
 def merged_fold(ast_dir: Path, meth_dir: Path, lam: float, fold: int):
     """Align AST's and one method's predictions for a single (lambda, fold).
 
-    Pairing is positional, which is only valid if both experiments evaluated
-    the same test cases in the same order. The three assertions below verify
-    that precondition -- equal row counts, identical test-file basenames at
-    every position, identical labels at every position -- and fail loudly
-    rather than silently producing a meaningless paired statistic.
+    Pairing is by row position, so both runs must have evaluated the same
+    test cases in the same order. The asserts check row counts, basenames and
+    labels.
     """
     ast_df = load_fold(ast_dir, lam, fold).reset_index(drop=True)
     meth_df = load_fold(meth_dir, lam, fold).reset_index(drop=True)
@@ -110,7 +80,7 @@ def merged_fold(ast_dir: Path, meth_dir: Path, lam: float, fold: int):
         f"lambda={lam} fold={fold} row-count mismatch (ast={len(ast_df)}, meth={len(meth_df)})"
     )
     assert (ast_df["basename"] == meth_df["basename"]).all(), (
-        f"lambda={lam} fold={fold} filenames diverge at some row position -- "
+        f"lambda={lam} fold={fold} filenames diverge at some row position: "
         f"positional pairing is not valid here"
     )
     assert (ast_df["y_true"] == meth_df["y_true"]).all(), (
@@ -126,10 +96,9 @@ def merged_fold(ast_dir: Path, meth_dir: Path, lam: float, fold: int):
 def paired_bootstrap_auroc_diff(y_true, probs_ast, probs_meth, B=1000, seed=42):
     """Paired bootstrap of the AUROC difference (AST minus method).
 
-    Each iteration resamples test-case indices once and scores both models on
-    that same resample, so the shared test-set variance cancels. Returns the
-    B resampled differences; an undefined AUROC in a resample contributes the
-    chance value 0.5.
+    Each iteration draws one resample of test cases and scores both models on
+    it. Returns the B differences. If a resample has only one class, its
+    AUROC is set to 0.5.
     """
     rng = np.random.default_rng(seed)
     n = len(y_true)
@@ -150,11 +119,11 @@ def paired_bootstrap_auroc_diff(y_true, probs_ast, probs_meth, B=1000, seed=42):
 
 
 def compare(ast_dir: Path, meth_dir: Path, name: str):
-    """Compare AST against one method at every lambda in the sweep.
+    """Compare AST with one method at every lambda.
 
-    Per lambda: per-fold AUROCs for the paired t-test, then the folds pooled
-    into a single test set for the pooled AUROCs, the paired-bootstrap 95%
-    percentile interval, and a two-sided bootstrap p-value.
+    Per lambda: paired t-test on per-fold AUROCs, and on the pooled folds the
+    AUROCs, 95% percentile bootstrap interval of the difference and a
+    two-sided bootstrap p-value.
     """
     results = {}
     for lam in LAMBDAS:
@@ -194,16 +163,14 @@ def compare(ast_dir: Path, meth_dir: Path, name: str):
 def main():
     out = {
         "methodology_note": (
-            "PAIRED comparison of AST against each alternative backbone, within matching "
-            "unfreezing modes, using the 5-fold runs on both sides: "
+            "Paired comparison of AST against each alternative backbone in the same "
+            "unfreezing mode, 5-fold on both sides: "
             "results/reviewer1_unfreezing_ablation/{frozen_5fold,full_5fold_variable}/ for "
             "AST and results/reviewer7_backbone_swap/{panns,yamnet,hubert}[_full]/ for the "
-            "alternatives. Both sides construct folds, file ordering and synthesized "
-            "negatives identically, so predictions correspond row by row; the loader "
-            "asserts matching row counts, basenames and labels before pairing. This "
-            "enables a paired bootstrap and a paired t-test on per-fold AUROCs. Distinct "
-            "from compute_significance_vs_ast.py, which compares against the published "
-            "frozen 10-fold model and is unpaired."
+            "other backbones. Folds, file order and noise-only negatives are built the same "
+            "way in both, so predictions are paired row by row (row counts, basenames and "
+            "labels are checked). Paired bootstrap on pooled AUROC and paired t-test on "
+            "per-fold AUROCs."
         ),
         "bootstrap_iterations": B, "n_folds": N_FOLDS, "seed": SEED,
     }

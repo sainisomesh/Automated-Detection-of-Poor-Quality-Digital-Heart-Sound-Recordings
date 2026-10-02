@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 """
-Generate Pre-Mixed Datasets for Each Noise Level (λ).
+Generate pre-mixed datasets for each noise level (λ).
 
-Creates WAV files with heart sounds mixed with noise at each λ value,
-using the exact same RMS mixing formula and deterministic seeds as
-the training scripts.
+Writes WAV files of heart sounds mixed with noise at each λ, using the same
+RMS mixing formula and seeds as the training scripts.
 
-NOTE: The training scripts (train_per_lambda_cv.py, train_three_strategies_cv.py)
-already mix noise ON-THE-FLY during training — you do NOT need to run this
-script before training. This script is provided for:
-  1. Generating demo/example files for audio inspection
-  2. Pre-generating full mixed datasets if desired
-  3. Zenodo upload of mixed datasets for data availability
+The training scripts (train_per_lambda_cv.py, train_three_strategies_cv.py)
+mix noise on the fly, so this script is not needed for training. It is used for:
+  1. Example files for listening/inspection
+  2. Pre-generating the full mixed datasets
+  3. The mixed-dataset archive on Zenodo
 
 Modes:
-  --demo     Generate 10 example files per λ (quick, ~200 MB total)
-  (default)  Generate ALL files per λ (~19 GB total)
+  --demo     10 example files per λ (~200 MB total)
+  (default)  All files per λ (~19 GB total)
 
 Output structure:
     mixed_dataset/
@@ -53,7 +51,7 @@ DEFAULT_LAMBDAS = [0, 0.25, 0.5, 1, 5, 10, 25, 50, 75, 100]
 
 
 def load_audio(path):
-    """Load and preprocess a single audio file (matches training pipeline exactly)."""
+    """Load and preprocess one audio file (same steps as the training pipeline)."""
     try:
         wav, _ = librosa.load(path, sr=TARGET_SR, mono=True)
     except Exception:
@@ -78,7 +76,7 @@ def load_audio(path):
 
 
 def mix_rms(heart, noise, lam):
-    """Mix heart sound with noise at λ using RMS-based scaling.
+    """Mix heart sound with noise at λ using RMS scaling (Eq. 2).
 
     Formula: mixed = heart + λ × (noise × (rms_heart / rms_noise))
     """
@@ -97,7 +95,7 @@ def mix_rms(heart, noise, lam):
 
 
 def generate_noise(icbhi_files, env_files, rng):
-    """Generate structured noise: lung + 0.5 × environmental."""
+    """Composite noise (Eq. 1): lung + 0.5 × environmental, peak-normalized."""
     for _ in range(10):
         lung = load_audio(rng.choice(icbhi_files))
         env = load_audio(rng.choice(env_files))
@@ -151,7 +149,7 @@ def main():
             if heart_wav is None:
                 continue
 
-            # Deterministic noise selection per file
+            # Per-file seed so the noise draw is reproducible
             file_rng = random.Random(args.seed + i)
             noise_wav = generate_noise(icbhi_files, env_files, file_rng)
             mixed = mix_rms(heart_wav, noise_wav, lam)
@@ -176,7 +174,6 @@ def main():
                 "source_heart": "none", "lambda": lam
             })
 
-        # Save manifest
         pd.DataFrame(manifest_rows).to_csv(os.path.join(out_dir, "manifest.csv"), index=False)
         total_files += len(manifest_rows)
         logger.info(f"  Saved {len(manifest_rows)} files to {out_dir}")

@@ -1,26 +1,20 @@
 """
-AST-QA model with a configurable backbone freeze policy: frozen, fully
-fine-tuned, or top-K layer unfreezing.
+AST-QA model with a configurable freeze policy: frozen, fully fine-tuned, or
+top-K layer unfreezing.
 
-The architecture is identical to the published model in
-`../models/ast_qa.py` (ASTHeartQA) -- same AST backbone, same QA head
-Linear(768, 128) -> ReLU -> Dropout(0.1) -> Linear(128, 1) -- and is kept as
-a separate class rather than added to that file, so that the code path which
-reproduces the originally published results is never modified by a revision
-experiment.
+Same architecture as ASTHeartQA in `../models/ast_qa.py` (same AST backbone
+and QA head Linear(768, 128) -> ReLU -> Dropout(0.1) -> Linear(128, 1)). It is
+a separate class so the code that reproduces the published results is left
+unchanged.
 
-Encoder structure (as exposed by `transformers`' ASTModel):
+Encoder structure (transformers' ASTModel):
     embeddings              patch + positional embeddings
     encoder.layer[0..11]    12 ASTLayer transformer blocks
-    layernorm               final LayerNorm, producing the [CLS] token
-                            representation that both classifiers consume
+    layernorm               final LayerNorm before the [CLS] token is read
 
-"Top-K" unfreezing means the LAST K transformer blocks
-(`encoder.layer[12-K:]`) plus the final layernorm, i.e. the layers closest to
-the classifier head. This is the conventional progressive-unfreezing choice:
-the early, general AudioSet features stay frozen while only the late,
-task-specific layers adapt. K is restricted to {2, 4}, the two settings
-reported in the ablation.
+Top-K unfreezing trains the last K blocks (`encoder.layer[12-K:]`) and the
+final layernorm, i.e. the layers closest to the head, and keeps the earlier
+layers frozen. K is 2 or 4, the settings in the ablation.
 """
 
 import torch.nn as nn
@@ -73,10 +67,9 @@ class ASTHeartQAUnfreeze(nn.Module):
     def _apply_freeze_policy(self):
         """Apply the current freeze policy to the encoder parameters.
 
-        The encoder is always reset to fully frozen first and then
-        selectively re-enabled, which makes set_unfreeze_mode() safe to call
-        repeatedly (e.g. a head-only warmup followed by top-K unfreezing)
-        without leaving a stale requires_grad=True from an earlier mode.
+        The encoder is first fully frozen and then partly unfrozen, so
+        set_unfreeze_mode() can be called repeatedly (e.g. head-only warmup,
+        then top-K) without leftover requires_grad=True from a previous mode.
         """
         for p in self.encoder.parameters():
             p.requires_grad = False
@@ -102,9 +95,8 @@ class ASTHeartQAUnfreeze(nn.Module):
     def set_unfreeze_mode(self, unfreeze_mode, topk_layers=0):
         """Switch the freeze policy mid-training.
 
-        Used for the progressive schedule: a head-only warmup with
-        `unfreeze_mode="frozen"`, then `unfreeze_mode="topk"` to unfreeze the
-        last K layers and continue training the same model instance.
+        Used for progressive unfreezing: warm up the head with
+        `unfreeze_mode="frozen"`, then switch to `unfreeze_mode="topk"`.
         """
         if unfreeze_mode not in UNFREEZE_MODES:
             raise ValueError(f"unfreeze_mode must be one of {UNFREEZE_MODES}, got {unfreeze_mode!r}")
@@ -117,8 +109,8 @@ class ASTHeartQAUnfreeze(nn.Module):
     def trainable_backbone_parameters(self):
         """Encoder parameters currently trainable (empty in frozen mode).
 
-        Returned separately from the head so that the optimizer can give the
-        backbone its own, lower learning rate.
+        Kept separate from the head so the backbone can get a lower
+        learning rate.
         """
         return [p for p in self.encoder.parameters() if p.requires_grad]
 
@@ -132,10 +124,8 @@ class ASTHeartQAUnfreeze(nn.Module):
         """Return (original AudioSet logits, QA logit) for a batch of spectrograms."""
         outputs = self.encoder(input_values)
         cls_token_state = outputs.last_hidden_state[:, 0, :]
-        # The original AudioSet head (527 classes) is not used by the QA loss;
-        # it is returned only so this class has the same forward signature and
-        # return arity as the published ASTHeartQA, letting the two be used
-        # interchangeably by the training/eval loops.
+        # The 527-class AudioSet logits are unused; they are returned so the
+        # output matches ASTHeartQA and the two classes are interchangeable.
         original_logits = self.original_classifier(cls_token_state)
         qa_logits = self.qa_classifier(cls_token_state)
         return original_logits, qa_logits

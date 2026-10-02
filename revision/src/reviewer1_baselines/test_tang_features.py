@@ -1,12 +1,11 @@
 """
-Behavioural sanity checks for tang_features.py.
+Sanity checks for tang_features.py.
 
-Not an exhaustive unit-test suite: each check feeds a synthetic signal whose
-expected feature behaviour is known analytically (Gaussian noise, pure tones,
-a periodic waveform, a synthetic PCG) and asserts that the corresponding
-ported function responds in the documented direction. This catches the common
-classes of porting error -- wrong reduction axis, missing normalization,
-off-by-one lag windows -- without requiring the original MATLAB runtime.
+Each check feeds a synthetic signal with known expected behaviour (Gaussian
+noise, pure tones, a periodic waveform, a synthetic PCG) and checks that the
+ported function responds in the expected direction. This catches common
+porting errors (wrong reduction axis, missing normalization, off-by-one lag
+windows) without needing MATLAB.
 
 Exits non-zero if any check fails.
 
@@ -25,16 +24,16 @@ rng = np.random.default_rng(42)
 
 
 def check(name, cond, detail=""):
-    """Report one check and return its outcome, for accumulation by main()."""
+    """Print one check result and return it."""
     status = "PASS" if cond else "FAIL"
-    print(f"[{status}] {name}" + (f" -- {detail}" if detail else ""))
+    print(f"[{status}] {name}" + (f": {detail}" if detail else ""))
     return cond
 
 
 def main():
     all_ok = True
 
-    # ── remove_spike ──
+    # remove_spike
     x = rng.normal(0, 1, 5000)
     x[100] = 1000.0  # inject an obvious spike
     y = remove_spike(x)
@@ -48,7 +47,7 @@ def main():
         np.allclose(y[:100], x[:100]),
     )
 
-    # ── get_kurtosis ──
+    # get_kurtosis
     gauss = rng.normal(0, 1, 200_000)
     k_gauss = get_kurtosis(gauss)
     all_ok &= check(
@@ -66,7 +65,7 @@ def main():
         f"got {k_imp:.3f} vs gaussian {k_gauss:.3f}",
     )
 
-    # ── get_energy_ratio ──
+    # get_energy_ratio
     t = np.arange(0, 10, 1 / FS)
     low_tone = np.sin(2 * np.pi * 50 * t)     # inside [24,144] band
     high_tone = np.sin(2 * np.pi * 400 * t)   # inside [200, fs/2] band
@@ -84,7 +83,7 @@ def main():
         f"got {r_high_in_high:.3f}",
     )
 
-    # ── get_max_axcor_coef ──
+    # get_max_axcor_coef
     period_samples = 700  # 0.7s period -> within [0.3fs, 2fs] lag search window
     periodic = np.sin(2 * np.pi * t / (period_samples / FS))
     full = np.correlate(periodic, periodic, mode="full")
@@ -96,7 +95,7 @@ def main():
         f"got {max_coef:.3f}",
     )
 
-    # ── get_sampen_fast ──
+    # get_sampen_fast
     sine = np.sin(2 * np.pi * 2 * t)
     noise = rng.normal(0, 1, len(t))
     se_sine = get_sampen_fast(sine, 2, 0.2)
@@ -107,7 +106,7 @@ def main():
         f"sine={se_sine:.3f} noise={se_noise:.3f}",
     )
 
-    # ── get_degree_cycle ──
+    # get_degree_cycle
     heart_rate_hz = 1.2  # ~72 bpm envelope modulation
     periodic_envelope = 1 + 0.8 * np.sin(2 * np.pi * heart_rate_hz * t)
     d_periodic = get_degree_cycle(periodic_envelope, 0.3, 2.5, FS)
@@ -118,8 +117,8 @@ def main():
         f"periodic={d_periodic:.3f} noise={d_noise:.3f}",
     )
 
-    # ── full pipeline on a synthetic PCG: two Hanning-windowed bursts per
-    # cardiac cycle (S1 then S2) at ~72 bpm, plus low-level Gaussian noise ──
+    # Full pipeline on a synthetic PCG: two Hanning-windowed bursts per
+    # cardiac cycle (S1 then S2) at ~72 bpm, plus low-level Gaussian noise
     heartbeat = np.zeros(len(t))
     beat_period = int(FS / heart_rate_hz)
     for start in range(0, len(heartbeat) - 20, beat_period):

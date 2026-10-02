@@ -18,13 +18,11 @@ cycle, where no heart sound is expected to occur.
 Deviation from the original method: cardiac-cycle segmentation
 --------------------------------------------------------------
 The original paper delimits cardiac cycles using R-peaks from an ECG channel
-recorded simultaneously with the PCG. The datasets used here are PCG-only and
-contain no synchronized ECG, so cycle duration is instead estimated from the
-peak of the PCG envelope's own autocorrelation -- the same envelope
-autocorrelation technique used by the Tang et al. feature set (see
-`tang_features.get_max_axcor_coef`). The SNR formula itself is unmodified;
-only the cycle-boundary input to it differs. Results obtained from this
-baseline should be reported with that substitution stated.
+recorded simultaneously with the PCG. Our datasets are PCG-only, so cycle
+duration is estimated from the peak of the PCG envelope autocorrelation, the
+same technique used in the Tang et al. feature set (see
+`tang_features.get_max_axcor_coef`). The SNR formula itself is unchanged;
+only the cycle boundaries differ.
 """
 
 import numpy as np
@@ -36,9 +34,9 @@ def _estimate_cycle_duration_samples(phs: np.ndarray, fs: float,
                                       min_cf: float = 0.3, max_cf: float = 2.5) -> int:
     """Estimate the cardiac cycle duration in samples from the PCG itself.
 
-    Computes the STFT amplitude envelope (reusing
-    `tang_features.get_envelope_from_stft` rather than duplicating it), takes
-    its normalized autocorrelation, and returns the lag of the largest peak
+    Computes the STFT amplitude envelope
+    (`tang_features.get_envelope_from_stft`), takes its normalized
+    autocorrelation, and returns the lag of the largest peak
     within the plausible heart-rate range.
 
     Parameters
@@ -75,10 +73,8 @@ def compute_snr_db(wav: np.ndarray, fs: float) -> float:
 
     Splits `wav` into consecutive cycles of the estimated cycle length,
     computes SNR = 20*log10(AS / (4*sigma_n)) per cycle, and aggregates across
-    cycles with the median. The median is used so that a single badly
-    corrupted cycle cannot dominate the recording-level score; the original
-    paper reports a recording-level SNR without specifying its cross-cycle
-    aggregator.
+    cycles with the median, so a single corrupted cycle cannot dominate the
+    score. The original paper does not specify how cycles are aggregated.
 
     Returns -inf if no cycle yields a usable measurement.
     """

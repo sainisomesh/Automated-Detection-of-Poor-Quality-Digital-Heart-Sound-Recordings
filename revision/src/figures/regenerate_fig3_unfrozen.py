@@ -7,8 +7,7 @@ lambda, with one curve per training strategy (clean-only, variable-noise
 U[0,10], fixed-noise lambda=10) alongside the per-lambda matched benchmark.
 Error bars are the 95% confidence intervals recorded alongside each mean.
 
-Writes the PDFs next to this script; copy them into the manuscript source
-directory to update the figure.
+Writes the PDFs to revision/results/figures/.
 """
 import json
 from pathlib import Path
@@ -89,7 +88,8 @@ marker_map = {
 }
 
 order = ['clean', 'noise_0_10', 'noise_10', 'per_lambda']
-OUT_DIR = Path(__file__).resolve().parent
+OUT_DIR = REVISION_ROOT / "results" / "figures"
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 for metric in METRICS:
     fig, ax = plt.subplots(figsize=(9, 4), facecolor='white')

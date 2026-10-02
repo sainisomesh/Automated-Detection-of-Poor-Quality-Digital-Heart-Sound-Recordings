@@ -1,17 +1,15 @@
 """
 AST-QA model with a configurable backbone freezing policy.
 
-Supports the three backbone-adaptation regimes compared in the unfreezing
-ablation: a fully frozen encoder, end-to-end fine-tuning, and top-K layer
-unfreezing.
+Used for the unfreezing ablation: fully frozen encoder, end-to-end
+fine-tuning, and top-K layer unfreezing.
 
-The architecture is identical to the paper's `ASTHeartQA`
-(`src/models/ast_qa.py`): an AST encoder pretrained on AudioSet, whose
+The architecture is the same as the paper's `ASTHeartQA`
+(`src/models/ast_qa.py`): an AudioSet-pretrained AST encoder whose
 768-dimensional [CLS] embedding feeds a binary QA head
-(Linear(768,128) -> ReLU -> Dropout(0.1) -> Linear(128,1)). It is kept as a
-separate module rather than adding a flag to `src/models/ast_qa.py` so that
-the code path reproducing the published Table 2 / Figure 3 results is not
-shared with, and cannot be perturbed by, the revision experiments.
+(Linear(768,128) -> ReLU -> Dropout(0.1) -> Linear(128,1)). It is a separate
+module so the code that reproduces the published Table 2 / Figure 3 results
+stays unchanged.
 
 Encoder layout (`self.encoder` is a `transformers` ASTModel):
     embeddings              patch + positional embeddings
@@ -23,14 +21,10 @@ Encoder layout (`self.encoder` is a `transformers` ASTModel):
 Freezing policies:
     "frozen"  encoder entirely frozen; only the QA head trains.
     "full"    every encoder parameter trains (end-to-end fine-tuning).
-    "topk"    the LAST K transformer blocks, i.e. encoder.layer[12-K:], plus
-              the final layernorm, train; blocks 0..(12-K-1) and the patch
-              embeddings stay frozen. The unfrozen blocks are therefore the
-              ones nearest the classifier head, following the usual
-              progressive-unfreezing rationale: the early blocks hold generic
-              AudioSet acoustic features and are left untouched, while the
-              late, task-specific blocks adapt. The ablation evaluates
-              K in {2, 4}.
+    "topk"    the last K transformer blocks (encoder.layer[12-K:]) and the
+              final layernorm train; earlier blocks and the patch embeddings
+              stay frozen. Early blocks hold generic AudioSet features, so only
+              the blocks nearest the head adapt. The ablation uses K in {2, 4}.
 """
 
 import torch.nn as nn
@@ -82,11 +76,9 @@ class ASTHeartQAUnfreeze(nn.Module):
     def _apply_freeze_policy(self):
         """Set ``requires_grad`` on the encoder according to the current mode.
 
-        The encoder is reset to fully frozen before the selected policy is
-        applied, so the method is idempotent and safe to re-apply on a model
-        that is already partially unfrozen (as the progressive top-K schedule
-        does when it transitions out of head-only warmup); no parameter left
-        trainable by a previous policy can survive into the new one.
+        The encoder is first reset to fully frozen, so calling this again on a
+        partially unfrozen model (as the progressive top-K schedule does after
+        warmup) leaves no stale trainable parameters.
         """
         for p in self.encoder.parameters():
             p.requires_grad = False
@@ -151,10 +143,9 @@ class ASTHeartQAUnfreeze(nn.Module):
 
         Returns:
             (original_logits, qa_logits): the pretrained 527-class AudioSet
-            logits and the single binary quality logit per clip. The AudioSet
-            logits are not used by the QA loss; they are returned to keep the
-            forward signature identical to the paper's ``ASTHeartQA``, so both
-            models are interchangeable in the training and evaluation loops.
+            logits and the binary quality logit per clip. The AudioSet logits
+            are not used in the loss; they are returned so the signature
+            matches ``ASTHeartQA`` and the two models are interchangeable.
         """
         outputs = self.encoder(input_values)
         cls_token_state = outputs.last_hidden_state[:, 0, :]
@@ -164,7 +155,7 @@ class ASTHeartQAUnfreeze(nn.Module):
 
 
 if __name__ == "__main__":
-    # Report the trainable/total parameter counts of each ablation condition.
+    # Print trainable/total parameter counts for each ablation condition
     for mode, k in [("frozen", 0), ("full", 0), ("topk", 2), ("topk", 4)]:
         m = ASTHeartQAUnfreeze(unfreeze_mode=mode, topk_layers=k)
         tag = mode if mode != "topk" else f"topk{k}"

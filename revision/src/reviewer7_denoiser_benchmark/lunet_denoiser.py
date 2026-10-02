@@ -1,5 +1,5 @@
 """
-LU-Net heart-sound denoiser -- Candidate 2 of the denoise-then-classify
+LU-Net heart-sound denoiser, candidate 2 of the denoise-then-classify
 comparison (Reviewer #7, Comment 1).
 
 Reference: Ali, Shuvo, Al-Manzo, Hasan & Hasan, "An end-to-end deep learning
@@ -7,50 +7,35 @@ framework for real-time denoising of heart sounds for cardiac disease
 detection in unseen noise," IEEE Access, 2023.
     github.com/ShamsNafisaAli/LU-Net-Heart-Sound-Denoising-
 
-TRAINING-DATA OVERLAP CAVEAT (important for interpreting any result from this
-candidate). LU-Net was trained on PhysioNet 2016 heart sounds mixed with
-ICBHI 2017 lung sounds. The noise construction evaluated in this paper also
-draws its biological interference from ICBHI 2017, so LU-Net's performance
-here is not fully independent of its own training distribution. The candidate
-is included deliberately -- it is the only published, pretrained PCG denoiser
-available for this comparison -- but its numbers must always be reported
-together with this overlap, never as a clean independent comparison.
+Training-data overlap: LU-Net was trained on PhysioNet 2016 heart sounds
+mixed with ICBHI 2017 lung sounds. Our noise also uses ICBHI 2017, so LU-Net
+is not fully independent of our test noise. It is included because it is the
+only published pretrained PCG denoiser we found, and its results should be
+reported with this caveat.
 
 Framework and weights:
-  - LU-Net is Keras/TensorFlow, not PyTorch. The released `Models/LU-Net.h5`
-    (~16 MB, committed in the authors' GitHub repository) is loaded whole --
-    architecture and weights together -- so nothing about the architecture is
-    reimplemented here and there is no porting risk. Because the file is in
-    the legacy pre-Keras-3 HDF5 format, it is loaded through the standalone
-    `tf_keras` compatibility package rather than modern `keras`.
-  - The weights are fetched on first use from raw.githubusercontent.com and
-    cached under ~/.cache/ast-heart-quality/; they are not vendored into this
-    repository.
-  - The upstream repository has no top-level LICENSE file, but
-    `Codes/model.py` states "This code is licensed under the terms of the
-    MIT-license"; attribution is preserved here accordingly.
+  - LU-Net is Keras/TensorFlow. The released `Models/LU-Net.h5` (~16 MB, in
+    the authors' repository) contains architecture and weights and is loaded
+    as is. It is in the pre-Keras-3 HDF5 format, so it is loaded with the
+    `tf_keras` package.
+  - The weights are downloaded on first use from raw.githubusercontent.com
+    and cached under ~/.cache/ast-heart-quality/.
+  - The upstream repository has no LICENSE file, but `Codes/model.py` states
+    it is MIT-licensed.
 
-Inference recipe, following the authors' own `Codes/config.py`,
-`Codes/processing_initial.py` and `Codes/utils.py`:
-  - The model operates at 1000 Hz, not 16 kHz.
-  - It consumes fixed 0.8 s (800-sample) non-overlapping segments; the
-    authors' loader takes `k = len(signal) // 800` full segments and drops
-    any remainder rather than padding a partial trailing segment.
-  - Every segment is peak-normalized before use in their pipeline. At
-    inference time that means normalizing each input segment, running the
-    model, then rescaling the output back to that segment's original peak.
-    Their own training/evaluation code omits the rescaling step because it
-    only ever handles already-normalized data; it is needed here because the
-    evaluation audio has its own amplitude scale.
+Inference follows the authors' `Codes/config.py`, `Codes/processing_initial.py`
+and `Codes/utils.py`:
+  - The model runs at 1000 Hz.
+  - Input is split into non-overlapping 0.8 s (800-sample) segments; the
+    authors keep `len(signal) // 800` full segments and drop the remainder.
+  - Each segment is peak-normalized. We normalize each input segment, run
+    the model, and scale the output back to the segment's original peak
+    (their code skips the last step because it only uses normalized data).
 
-Adaptation to this paper's 16 kHz / 10 s clips: resample to 1 kHz, denoise in
-800-sample segments, then resample the denoised result back to 16 kHz. A 10 s
-clip at 1 kHz is 10,000 samples, which is 12.5 segments, so the trailing
-partial segment (~0.4 s) that LU-Net's own convention would discard is filled
-back in from the ORIGINAL, non-denoised audio at that position. The output is
-therefore always the expected 160,000 samples, without inserting silence or
-looping content -- but note that a short tail of every clip passes through
-un-denoised.
+For our 16 kHz, 10 s clips: resample to 1 kHz, denoise in 800-sample
+segments, resample back to 16 kHz. 10 s at 1 kHz is 12.5 segments, so the
+last ~0.4 s is not denoised and is copied from the input. The output always
+has 160,000 samples.
 """
 
 import os
@@ -58,12 +43,8 @@ import os
 import numpy as np
 import librosa
 
-# The legacy-format .h5 is loaded via the standalone `tf_keras` package (see
-# _get_model below), which provides its own Keras-2-compatible API surface.
-# Note that the TF_USE_LEGACY_KERAS environment variable is deliberately NOT
-# set here: it would redirect `tensorflow.keras` to the legacy implementation
-# process-wide, affecting any other Keras model loaded in the same process,
-# and it is unnecessary when importing `tf_keras` directly.
+# The .h5 is loaded with `tf_keras` (see _get_model). TF_USE_LEGACY_KERAS is
+# not set because it would change `tensorflow.keras` for the whole process.
 
 LUNET_SR = 1000
 LUNET_SEGMENT_SECONDS = 0.8
@@ -76,18 +57,14 @@ DEFAULT_CACHE_PATH = os.path.join(
     os.path.expanduser("~"), ".cache", "ast-heart-quality", "LU-Net.h5"
 )
 
-# Loaded models are cached per weights path rather than in a single global
-# slot, so that a call with a different cache_path loads the model it asked
-# for instead of returning whichever model was loaded first.
+# Loaded models, keyed by weights path.
 _model_cache = {}
 
 
 def _download_weights(cache_path):
     """Fetch LU-Net.h5 into `cache_path` on first use; reuse it afterwards."""
-    # `requests` is used rather than urllib because it bundles its own certifi
-    # CA bundle. Some macOS Python builds do not wire urllib to the system
-    # trust store, which makes urllib.request.urlretrieve() fail with
-    # CERTIFICATE_VERIFY_FAILED on this URL.
+    # Use requests (bundled certifi CAs): on some macOS Python builds urllib
+    # fails here with CERTIFICATE_VERIFY_FAILED.
     import requests
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
     if not os.path.exists(cache_path):
@@ -101,11 +78,8 @@ def _download_weights(cache_path):
 def _get_model(cache_path=DEFAULT_CACHE_PATH):
     """Load (and memoize) the pretrained LU-Net model.
 
-    `tf_keras` is imported lazily so that importing this module does not pull
-    in TensorFlow unless LU-Net is actually used. The released .h5 predates
-    Keras 3, so `tf_keras.models.load_model` is required to read it;
-    compile=False skips reconstructing the training-time optimizer state,
-    which inference does not need.
+    `tf_keras` is imported here so TensorFlow is only loaded when LU-Net is
+    used. compile=False skips the training optimizer state.
     """
     if cache_path not in _model_cache:
         import tf_keras
@@ -117,14 +91,12 @@ def _get_model(cache_path=DEFAULT_CACHE_PATH):
 def lunet_denoise(wav_16k: np.ndarray, target_sr: int = 16000, cache_path: str = DEFAULT_CACHE_PATH) -> np.ndarray:
     """Denoise a 1-D waveform with the pretrained LU-Net model.
 
-    The input is expected to have already been through this benchmark's
-    ``load_audio()``: 16 kHz mono, DC-removed, bandpass-filtered and
-    peak-normalized.
+    Input is 16 kHz mono, DC-removed, bandpass-filtered and peak-normalized
+    (the output of ``load_audio()``).
 
-    Processing follows the authors' convention (see the module docstring):
-    resample to 1 kHz, split into 800-sample segments, peak-normalize each
-    segment, run the model, restore each segment's original peak, then
-    resample back to `target_sr`.
+    Resample to 1 kHz, split into 800-sample segments, peak-normalize each
+    segment, run the model, restore each segment's peak, and resample back
+    to `target_sr` (see the module docstring).
 
     Args:
         wav_16k: 1-D float waveform at `target_sr`.
@@ -132,12 +104,11 @@ def lunet_denoise(wav_16k: np.ndarray, target_sr: int = 16000, cache_path: str =
         cache_path: local path for the downloaded LU-Net weights.
 
     Returns:
-        Denoised waveform (float32) at the same sample rate and exactly the
-        same length as the input, rescaled to unit peak if it exceeds 1.0.
-        Any trailing samples not covered by a whole 800-sample segment (plus
-        resampling round-off) retain the ORIGINAL, non-denoised audio.
-        Near-silent input (peak < 1e-8) is returned unchanged, matching
-        wavelet_denoiser.py's behaviour.
+        Denoised float32 waveform with the same rate and length as the
+        input, rescaled to unit peak if it exceeds 1.0. Trailing samples not
+        covered by a full 800-sample segment keep the original audio.
+        Near-silent input (peak < 1e-8) is returned unchanged, as in
+        wavelet_denoiser.py.
     """
     wav = np.asarray(wav_16k, dtype=np.float64)
     n_samples_in = len(wav)
@@ -164,10 +135,8 @@ def lunet_denoise(wav_16k: np.ndarray, target_sr: int = 16000, cache_path: str =
 
     denoised_16k = librosa.resample(denoised_1k, orig_sr=LUNET_SR, target_sr=target_sr) if n_segments > 0 else np.zeros(0)
 
-    # Start from a copy of the original waveform and overwrite the denoised
-    # prefix, so whatever length is missing -- the trailing <0.8 s that
-    # LU-Net's own segmenting convention drops, plus any resampling round-off
-    # -- keeps the original, non-denoised audio instead of a gap or a loop.
+    # Overwrite the denoised prefix of a copy of the input; the trailing
+    # <0.8 s (and any resampling round-off) keeps the original audio.
     out = np.array(wav, dtype=np.float64, copy=True)
     n_denoised = min(len(denoised_16k), n_samples_in)
     out[:n_denoised] = denoised_16k[:n_denoised]
@@ -179,9 +148,8 @@ def lunet_denoise(wav_16k: np.ndarray, target_sr: int = 16000, cache_path: str =
 
 
 if __name__ == "__main__":
-    # Quick self-check: downloads the weights if needed and confirms the
-    # denoiser runs end to end, preserves length, and reduces the distance to
-    # a known clean signal on synthetic sine + white noise.
+    # Quick self-check on a synthetic sine + white noise (downloads weights
+    # if needed).
     rng = np.random.default_rng(0)
     t = np.linspace(0, 10, 160000)
     clean = 0.3 * np.sin(2 * np.pi * 2 * t)

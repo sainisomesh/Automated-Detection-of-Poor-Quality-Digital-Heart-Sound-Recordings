@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Per-Lambda Cross-Validation for AST Heart Quality Model.
+Per-lambda cross-validation for the AST heart quality model (Table 2).
 
-For each noise level λ, trains a fresh AST-QA model and evaluates using
+For each noise level λ, trains a fresh AST-QA model and evaluates it with
 10-fold patient-level cross-validation. This measures how well a model
-can distinguish heart sounds from noise when BOTH trained and tested at
-the same noise contamination level.
+separates heart sounds from noise when trained and tested at the same
+noise level.
 
 λ values: 0, 0.25, 0.5, 1, 5, 10, 25, 50, 75, 100
 
@@ -301,7 +301,8 @@ def main():
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-        # Aggregate
+        # Rough normal-approximation CI for the progress file; compute_metrics.py
+        # recomputes all metrics with Student's t CIs from the raw predictions.
         avg_auroc = np.mean([m['auroc'] for m in lambda_metrics])
         ci_auroc = 1.96 * np.std([m['auroc'] for m in lambda_metrics]) / np.sqrt(args.n_folds)
         avg_f1 = np.mean([m['f1'] for m in lambda_metrics])

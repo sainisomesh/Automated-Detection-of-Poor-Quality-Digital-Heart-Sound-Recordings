@@ -1,24 +1,17 @@
 """
-Generic audio backbone plus the paper's binary quality-assurance head
-(Reviewer #7, Comment 2).
+Audio backbone plus the binary quality head (Reviewer #7, Comment 2).
 
-The head is architecturally identical to ASTHeartQA's in ../models/ast_qa.py
--- Linear(embedding_dim, 128) -> ReLU -> Dropout(0.1) -> Linear(128, 1) -- so
-that the only difference between this model and the published AST-QA model is
-which encoder produces the embedding. Holding the head fixed is what makes the
-backbone the sole independent variable in the comparison.
+The head is the same as ASTHeartQA's in ../models/ast_qa.py,
+Linear(embedding_dim, 128) -> ReLU -> Dropout(0.1) -> Linear(128, 1), so the
+encoder is the only thing that changes between this model and AST-QA.
 
-Two modes, matching the frozen/full split used by the unfreezing ablation in
+Two modes, matching the frozen/full split of the unfreezing ablation in
 ../reviewer1_unfreezing_ablation/:
   - freeze_backbone=True (default): the backbone is a fixed feature extractor
-    and only the head is trained, isolating the effect of the pretrained
-    representation and architectural inductive bias (self-attention versus
-    convolutional) from fine-tuning capacity.
-  - freeze_backbone=False: the backbone is fine-tuned end to end alongside the
-    head, which tests whether any AST advantage observed in the frozen setting
-    is specific to frozen-feature transfer rather than to the architecture.
-    Each wrapper still keeps its fixed, non-learnable front-end frozen; see
-    backbones.py.
+    and only the head is trained.
+  - freeze_backbone=False: the backbone is fine-tuned end to end with the
+    head. Each wrapper still keeps its fixed, non-learnable front-end frozen
+    (see backbones.py).
 """
 
 import torch.nn as nn
@@ -32,12 +25,12 @@ class BackboneQAHead(nn.Module):
     Args:
         backbone_name: one of the keys in backbones.BACKBONES
             ("panns", "yamnet", "hubert").
-        freeze_backbone: if True the backbone is eval-locked and run under
-            no_grad, so only qa_classifier is trained.
+        freeze_backbone: if True the backbone is kept in eval mode and run
+            under no_grad, so only qa_classifier is trained.
 
     forward() takes a (B, 160000) float32 16 kHz waveform batch and returns
-    raw (B, 1) logits, for use with BCEWithLogitsLoss; apply a sigmoid to
-    obtain the probability that a recording is of usable quality.
+    raw (B, 1) logits for BCEWithLogitsLoss. Sigmoid of the logit is the
+    probability that the recording is usable.
     """
 
     def __init__(self, backbone_name: str, freeze_backbone: bool = True):
