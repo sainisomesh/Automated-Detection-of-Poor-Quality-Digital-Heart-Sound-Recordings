@@ -100,9 +100,9 @@ def wavelet_denoise(wav: np.ndarray, method: str = "BayesShrink", wavelet: str =
 # were not tuned on our data; the variant was only checked on synthetic
 # signals (test_denoiser_benchmark.py).
 #
-# Limitation: on clean heart recordings this variant removes about 2-13% of
-# the signal energy (versus about 0% for wavelet_denoise()) and lowers AUROC
-# at lambda = 0.0. S1/S2 are broadband transients with energy at many scales,
+# Limitation: on clean heart recordings this variant removes part of the
+# signal energy (median about 7%, more than 30% on some recordings, versus
+# about 0% for wavelet_denoise()) and lowers AUROC at lambda = 0.0. S1/S2 are broadband transients with energy at many scales,
 # so per-level estimates treat part of the heart sound as noise. Results for
 # this condition should be reported with this caveat.
 # ---------------------------------------------------------------------------
