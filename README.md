@@ -7,8 +7,9 @@ Code, results and reproduction scripts for the manuscript of the same title
 
 DESCRIPTION
 -----------
-The model classifies 10-second phonocardiogram recordings as acceptable
-heart sound (label 1) or noise-dominated (label 0). Log-Mel spectrograms are
+The model classifies 10-second recordings as containing a heart sound,
+clean or with added noise (label 1), or as noise without a heart sound
+(label 0). Log-Mel spectrograms are
 passed through the Audio Spectrogram Transformer (AST), initialized from the
 `MIT/ast-finetuned-audioset-10-10-0.4593` checkpoint on Hugging Face, with a
 binary classification head (768 -> 128 -> 1). In the revised manuscript the
