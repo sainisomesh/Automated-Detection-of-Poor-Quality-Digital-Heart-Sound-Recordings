@@ -79,7 +79,6 @@ def wavelet_denoise(wav: np.ndarray, method: str = "BayesShrink", wavelet: str =
     return denoised.astype(np.float32)
 
 
-# ---------------------------------------------------------------------------
 # Level-dependent noise estimation (our own variant, used as an extra
 # condition next to wavelet_denoise()). It is not a published method.
 #
@@ -105,7 +104,6 @@ def wavelet_denoise(wav: np.ndarray, method: str = "BayesShrink", wavelet: str =
 # about 0% for wavelet_denoise()) and lowers AUROC at lambda = 0.0. S1/S2 are broadband transients with energy at many scales,
 # so per-level estimates treat part of the heart sound as noise. Results for
 # this condition should be reported with this caveat.
-# ---------------------------------------------------------------------------
 
 def _sigma_est_level(detail_coeffs: np.ndarray) -> float:
     """MAD-based Gaussian noise sigma estimate for one decomposition level.

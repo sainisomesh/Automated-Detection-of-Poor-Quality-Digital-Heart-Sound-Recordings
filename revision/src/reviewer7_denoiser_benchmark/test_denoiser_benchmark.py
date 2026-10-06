@@ -194,6 +194,9 @@ def check_7_kfold_matches_reference_csv():
         return
     from sklearn.model_selection import KFold
     heart_files = sorted(DATA_DIR.rglob("PhysioNet2022/**/*.wav"))
+    if not heart_files:
+        print("    [SKIP] no PhysioNet2022 recordings under the dataset directory")
+        return
     patient_map = {}
     for f in heart_files:
         patient_map.setdefault(f.name.split("_")[0], []).append(f)

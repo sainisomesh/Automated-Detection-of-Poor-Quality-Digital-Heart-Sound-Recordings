@@ -8,7 +8,6 @@ evaluated with 5-fold patient-level CV, read from
 `../../results/reviewer1_unfreezing_ablation/full_5fold_variable/`.
 
 Why rows can be paired
-----------------------
 The baselines and this AST-QA model use the same 5-fold construction, so
 fold i holds out the same recordings in all three pipelines:
 
@@ -26,7 +25,6 @@ real filename, so they are matched by position; `merged_fold` asserts that
 row counts, basenames and labels agree.
 
 Method
-------
   1. Per lambda and fold, align each baseline's predictions with AST-QA's by
      row position (after the checks above).
   2. Pool the aligned pairs across the 5 folds (each sample is held out once).

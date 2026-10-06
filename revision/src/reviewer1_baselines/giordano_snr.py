@@ -16,7 +16,6 @@ the standard deviation of a quiet window located at 70-85% of the cardiac
 cycle, where no heart sound is expected to occur.
 
 Deviation from the original method: cardiac-cycle segmentation
---------------------------------------------------------------
 The original paper delimits cardiac cycles using R-peaks from an ECG channel
 recorded simultaneously with the PCG. Our datasets are PCG-only, so cycle
 duration is estimated from the peak of the PCG envelope autocorrelation, the
@@ -40,14 +39,12 @@ def _estimate_cycle_duration_samples(phs: np.ndarray, fs: float,
     within the plausible heart-rate range.
 
     Parameters
-    ----------
     min_cf, max_cf : float
         Heart-rate bounds in Hz, which map to the longest (1/min_cf s) and
         shortest (1/max_cf s) cycle durations searched. The 0.3-2.5 Hz default
         covers roughly 18-150 bpm.
 
     Returns
-    -------
     int
         Estimated cycle length in samples; falls back to one second's worth of
         samples if the search window is degenerate.

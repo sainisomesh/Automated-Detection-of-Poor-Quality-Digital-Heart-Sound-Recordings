@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
-# ============================================================================
-# RUN ALL: reproduce the results of "Automated Detection of Poor-Quality
-# Digital Heart Sounds via Noise Augmentation"
-# ============================================================================
+# Reproduce the results of "Automated Detection of Poor-Quality Digital Heart
+# Sounds via Noise Augmentation".
 #
 # Step 1  Verify (minutes, CPU only, no data download). Recomputes every
-#         table, significance marker and quoted number in the manuscript
-#         from the checked-in per-fold predictions, re-runs the paired
-#         significance tests, and regenerates Figure 3.
-# Step 2  Retrain the revised manuscript's experiments (GPU, optional).
-#         Hands off to revision/run_all.sh, which prompts per experiment.
-# Step 3  Retrain the original preprint's frozen-backbone, 10-fold
-#         experiments (GPU, optional). The revised manuscript uses them only
-#         for the variable-noise column of Table 6's frozen panel.
+#         table, significance marker and quoted number from the checked-in
+#         per-fold predictions, re-runs the paired significance tests, and
+#         regenerates Figure 3.
+# Step 2  Retrain the experiments in revision/ (GPU, optional). Hands off to
+#         revision/run_all.sh, which prompts per experiment.
+# Step 3  Retrain the frozen-backbone per-lambda and three-strategies
+#         experiments in src/ (GPU, optional).
+#
+# All cross-validation is 5-fold at the patient level, seed 42.
 #
 # Usage:
 #   ./run_all.sh                 verify, then ask before any retraining
@@ -21,7 +20,6 @@
 #
 # Requires bash (Linux, macOS, or Git Bash / WSL on Windows) and Python
 # 3.9-3.13. A virtual environment is created in .venv/ automatically.
-# ============================================================================
 
 set -euo pipefail
 
@@ -35,21 +33,19 @@ for arg in "$@"; do
     case "$arg" in
         --verify-only) VERIFY_ONLY=1 ;;
         --yes|-y) ASSUME_YES=1 ;;
-        -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
         *) echo "Unknown option: $arg (see --help)" >&2; exit 1 ;;
     esac
 done
 
-echo "============================================"
-echo "  AST Heart Quality Reproducibility Suite"
-echo "============================================"
+echo "AST heart quality reproducibility"
 echo ""
 
 setup_python
 echo ""
 
-# ── Step 1: Verify the manuscript against the released predictions ─
-echo "── Step 1: Verifying manuscript results from checked-in predictions ──"
+# Step 1: verify against the checked-in predictions
+echo "[Step 1] Verifying results from the checked-in predictions"
 install_requirements requirements-verify.txt
 echo ""
 
@@ -85,16 +81,16 @@ cp "$BACKUP/a.json" "$SIG_A"
 cp "$BACKUP/b.json" "$SIG_B"
 rm -rf "$BACKUP"
 if [ "$SIG_OK" = "0" ]; then
-    echo "✓ Significance tests reproduce the checked-in JSONs"
+    echo "Significance tests reproduce the checked-in JSONs."
 else
-    echo "✗ Regenerated significance results differ from the checked-in JSONs" >&2
+    echo "ERROR: regenerated significance results differ from the checked-in JSONs." >&2
     exit 1
 fi
 
 echo ""
 echo "Regenerating Figure 3..."
 python revision/src/figures/regenerate_fig3_unfrozen.py > /dev/null
-echo "✓ Figure 3 panels written to revision/results/figures/"
+echo "Figure 3 panels written to revision/results/figures/"
 echo ""
 
 if [ "$VERIFY_ONLY" = "1" ]; then
@@ -102,10 +98,10 @@ if [ "$VERIFY_ONLY" = "1" ]; then
     exit 0
 fi
 
-# ── Step 2: Retrain the revised manuscript's experiments ──────────
-echo "── Step 2: Retrain the revised manuscript's experiments (GPU) ──"
+# Step 2: revision experiments
+echo "[Step 2] Retrain the experiments in revision/ (GPU)"
 echo "Overwrites the checked-in results under revision/results/ in place;"
-echo "run verify_paper_results.py afterwards to compare against the manuscript."
+echo "run verify_paper_results.py afterwards to compare."
 if ask "Continue into the revision experiments?"; then
     bash "$SCRIPT_DIR/revision/run_all.sh"
 else
@@ -113,11 +109,11 @@ else
 fi
 echo ""
 
-# ── Step 3: Original preprint experiments (frozen, 10-fold) ───────
-echo "── Step 3: Original preprint experiments (frozen backbone, 10-fold, GPU) ──"
-echo "Per-lambda CV (10 lambdas x 10 folds) and three training strategies (3 x 10 folds)."
-echo "Roughly 60 GPU-hours on an A100. Overwrites results/ in place."
-if ask "Retrain the original 10-fold experiments?"; then
+# Step 3: frozen-backbone experiments in src/
+echo "[Step 3] Frozen-backbone per-lambda and three-strategies experiments (5-fold, GPU)"
+echo "Per-lambda CV (10 lambdas x 5 folds) and three training strategies (3 x 5 folds)."
+echo "Roughly 30 GPU-hours on an A100. Writes into results/."
+if ask "Retrain the frozen-backbone experiments in src/?"; then
     install_requirements requirements.txt
     python download_data.py dataset
 
@@ -128,18 +124,16 @@ if ask "Retrain the original 10-fold experiments?"; then
     cd src
     python train_per_lambda_cv.py \
         --data_dir ../dataset/ --output_dir ../results/per_lambda_cv/ \
-        --n_folds 10 --epochs 5 --seed 42
+        --n_folds 5 --epochs 5 --seed 42
     python train_three_strategies_cv.py \
         --data_dir ../dataset/ --output_dir ../results/three_strategies_cv/ \
-        --n_folds 10 --epochs 5 --seed 42
+        --n_folds 5 --epochs 5 --seed 42
     python compute_metrics.py --results_dir ../results/
     cd ..
-    echo "✓ Original experiments complete"
+    echo "Frozen-backbone experiments complete."
 else
     echo "Skipping"
 fi
 echo ""
 
-echo "============================================"
-echo "  RUN COMPLETE"
-echo "============================================"
+echo "Done."

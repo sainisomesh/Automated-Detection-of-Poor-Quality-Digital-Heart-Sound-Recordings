@@ -126,12 +126,10 @@ def get_energy_ratio(x: np.ndarray, fre: tuple, fs: float) -> float:
     PSD mass.
 
     Parameters
-    ----------
     fre : tuple
         (low, high) band edges in Hz, inclusive.
 
     Difference from MATLAB
-    ----------------------
     MATLAB's `pwelch` with default settings uses 8 Hamming-windowed segments
     at 50% overlap, i.e. nperseg = N/4.5 (the formula kept below). For our
     10 s @ 1000 Hz inputs (N = 10000) that gives nperseg = 2222 > nfft = 1000,
@@ -181,7 +179,6 @@ def get_sampen_fast(x: np.ndarray, m: int = 2, r: float = 0.2) -> float:
     signal.
 
     Parameters
-    ----------
     m : int
         Embedding dimension (template length).
     r : float
@@ -237,7 +234,6 @@ def get_degree_cycle(rx: np.ndarray, min_cf: float, max_cf: float, fs: float,
     high; broadband noise scores near 1.
 
     Parameters
-    ----------
     min_cf, max_cf : float
         Cycle-frequency search band in Hz (0.3-2.5 Hz for heart rate,
         i.e. ~18-150 bpm).
@@ -269,14 +265,12 @@ def extract_features(phs: np.ndarray, fs: float) -> np.ndarray:
     """Compute the 10 Tang et al. quality features (get_features_Tang.m).
 
     Parameters
-    ----------
     phs : np.ndarray
         Phonocardiogram already conditioned by `pre_processing()`.
     fs : float
         Sampling rate of `phs` in Hz (1000 Hz in the original work).
 
     Returns
-    -------
     np.ndarray
         The 10 features in published order; see FEATURE_NAMES.
     """

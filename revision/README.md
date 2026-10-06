@@ -1,15 +1,15 @@
 # Revision Experiments
 
-Reproducibility package for the four additional experiments reported in the revised
-manuscript of **Automated Detection of Poor-Quality Digital Heart Sounds via Noise
-Augmentation** ([SSRN 6749564](https://ssrn.com/abstract=6749564)).
+Code and results for four experiments of **Automated Detection of Poor-Quality Digital
+Heart Sounds via Noise Augmentation** ([SSRN 6749564](https://ssrn.com/abstract=6749564)).
 
-The parent directory `../` holds the original preprint's frozen-backbone, 10-fold
-experiments and the single entry point `../run_all.sh`. Both use the same source datasets.
+The parent directory `../` holds the frozen-backbone per-lambda and three-strategies
+experiments and the single entry point `../run_all.sh`. Both use the same source datasets
+and the same 5-fold patient splits.
 
 All results are checked in under `results/`. `../run_all.sh` (or
-`python ../verify_paper_results.py`) recomputes every number in the manuscript from them
-without retraining.
+`python ../verify_paper_results.py`) recomputes every reported number from them without
+retraining.
 
 ## Experiments
 
@@ -18,7 +18,7 @@ without retraining.
 | Published baselines | `reviewer1_baselines` | 5 | AST-QA against two prior PCG quality-assessment methods: Tang et al. (2021), an SVM over ten hand-crafted features, and Giordano et al. (2021), an SNR-threshold method. |
 | Backbone adaptation ablation | `reviewer1_unfreezing_ablation` | 5 | Frozen backbone vs. full fine-tuning vs. unfreezing only the top K transformer layers, plus the per-lambda matched benchmark for the fully fine-tuned model. |
 | Backbone swap | `reviewer7_backbone_swap` | 5 | PANNs CNN14, YAMNet and HuBERT substituted for the AST encoder, each evaluated frozen and fully fine-tuned, to test whether the advantage is architectural. |
-| Denoise-then-classify | `reviewer7_denoiser_benchmark` | 5 and 10 | A clean-only classifier evaluated on corrupted audio with and without three denoisers, compared against noise-aware training. |
+| Denoise-then-classify | `reviewer7_denoiser_benchmark` | 5 | A clean-only classifier evaluated on corrupted audio with and without three denoisers, compared against noise-aware training. |
 
 Every experiment evaluates across the same ten noise-intensity levels used throughout the
 study, $\lambda \in \{0, 0.25, 0.5, 1, 5, 10, 25, 50, 75, 100\}$, and uses patient-level
@@ -26,8 +26,8 @@ splits with a fixed seed of 42.
 
 ## Frozen and fine-tuned results
 
-The manuscript reports a fully fine-tuned AST backbone as its primary configuration, and
-retains the frozen-backbone results alongside it for comparison. Both are included here:
+The fully fine-tuned AST backbone is the primary configuration, with frozen-backbone
+results alongside it for comparison:
 
 - `reviewer1_unfreezing_ablation`: `{frozen,topk2,topk4}_5fold/` and `full_5fold_variable/`
   are the ablation itself. `full_5fold_clean/` and `full_5fold_fixed10/` are the other two
@@ -40,7 +40,8 @@ retains the frozen-backbone results alongside it for comparison. Both are includ
   fine-tuned. `compute_significance_full_paired.py` pairs each against the matching AST
   condition above.
 - `reviewer7_denoiser_benchmark`: `*_full_5fold/` use the fine-tuned backbone,
-  `*_10fold/` use the frozen backbone.
+  `*_frozen_5fold/` use the frozen backbone. The noise-aware reference for each is the
+  matching variable-noise run above (`full_5fold_variable/`, `frozen_5fold/`).
 - `reviewer1_baselines`: `compute_significance_paired.py` compares the baselines against
   the fine-tuned model on matched folds.
 
@@ -163,19 +164,19 @@ retraining. `--unfreeze_mode full` saves and loads the whole model, since the en
 differs per fold; frozen mode saves only the classification head, which is the only part
 that differs.
 
-Frozen backbone, 10-fold:
+Frozen backbone, 5-fold:
 
 ```bash
 cd src/reviewer7_denoiser_benchmark
 python run_denoiser_benchmark_cv.py \
     --data_dir ../../../dataset/ --mixed_dir ../../../mixed_dataset/ \
-    --output_dir ../../results/reviewer7_denoiser_benchmark/clean_only_10fold/ \
-    --n_folds 10 --conditions no_denoise --save_checkpoints --epochs 5 --seed 42
+    --output_dir ../../results/reviewer7_denoiser_benchmark/clean_only_frozen_5fold/ \
+    --n_folds 5 --conditions no_denoise --save_checkpoints --epochs 5 --seed 42
 python run_denoiser_benchmark_cv.py \
     --data_dir ../../../dataset/ --mixed_dir ../../../mixed_dataset/ \
-    --output_dir ../../results/reviewer7_denoiser_benchmark/denoiser_comparison_10fold/ \
-    --n_folds 10 --conditions no_denoise,denoise_wavelet,denoise_wavelet_leveldep,denoise_lunet \
-    --load_checkpoint_dir ../../results/reviewer7_denoiser_benchmark/clean_only_10fold/checkpoints/ \
+    --output_dir ../../results/reviewer7_denoiser_benchmark/denoiser_comparison_frozen_5fold/ \
+    --n_folds 5 --conditions no_denoise,denoise_wavelet,denoise_wavelet_leveldep,denoise_lunet \
+    --load_checkpoint_dir ../../results/reviewer7_denoiser_benchmark/clean_only_frozen_5fold/checkpoints/ \
     --seed 42
 ```
 
@@ -207,7 +208,7 @@ Every training script writes raw per-fold `predictions.csv` files plus aggregate
 metrics (mean and 95% half-width, 1.96 · SD / sqrt(n_folds), per lambda). With the same
 seed and fold count, a rerun reproduces the checked-in values up to GPU non-determinism.
 `python ../verify_paper_results.py` compares whatever predictions are in `results/` with
-the values printed in the manuscript.
+the reference values.
 
 The significance scripts are deterministic and read only the prediction CSVs, so they
 reproduce their JSON outputs exactly.

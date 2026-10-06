@@ -15,7 +15,6 @@ front-end (mel-spectrogram for PANNs/YAMNet, convolutional waveform encoder
 for HuBERT). Noise mixing and cross-validation are the same for all backbones.
 
 Frozen backbones are kept in eval mode
---------------------------------------
 All three backbones have layers whose behaviour depends on
 `nn.Module.training` regardless of `requires_grad`:
 
@@ -67,12 +66,10 @@ class _TogglableFreezeBackbone(nn.Module):
         return super().train(mode)
 
 
-# ---------------------------------------------------------------------------
 # PANNs CNN14 (Kong et al., IEEE/ACM TASLP 2020)
 # github.com/qiuqiangkong/audioset_tagging_cnn. Checkpoint "Cnn14_mAP=0.431.pth"
 # from Zenodo record 3987831. The architecture comes from the `panns_inference`
 # package, which includes the authors' model.py.
-# ---------------------------------------------------------------------------
 PANNS_SAMPLE_RATE = 32000  # the released Cnn14 checkpoint was trained at 32 kHz
 PANNS_CHECKPOINT_URL = "https://zenodo.org/record/3987831/files/Cnn14_mAP%3D0.431.pth?download=1"
 PANNS_CHECKPOINT_PATH = Path.home() / "panns_data" / "Cnn14_mAP=0.431.pth"
@@ -191,14 +188,12 @@ class PANNsBackbone(_TogglableFreezeBackbone):
         return out["embedding"]
 
 
-# ---------------------------------------------------------------------------
 # YAMNet (Google AudioSet), via the `torch-vggish-yamnet` PyTorch port
 # (github.com/w-hc/torch_audioset).
 #
 # Caveat: this is a community port of the weights, not an official Google
 # release, and we did not re-check its AudioSet mAP. test_backbones.py only
 # checks that it loads and gives finite, input-dependent embeddings.
-# ---------------------------------------------------------------------------
 YAMNET_SAMPLE_RATE = 16000  # YAMNet is trained at 16 kHz; no resampling needed
 
 
@@ -249,7 +244,6 @@ class YAMNetBackbone(_TogglableFreezeBackbone):
         return torch.stack(embeddings, dim=0)
 
 
-# ---------------------------------------------------------------------------
 # HuBERT (AudioSet): transformers.HubertModel with the
 # "ALM/hubert-base-audioset" weights, a 12-layer HuBERT-base (hidden_size=768)
 # with apply_spec_augment=True in its config.
@@ -260,7 +254,6 @@ class YAMNetBackbone(_TogglableFreezeBackbone):
 # (same weights). The bucket holding that copy is optional; without it the
 # code loads the public Hub model, which works with the torch version in
 # ../../requirements.txt.
-# ---------------------------------------------------------------------------
 HUBERT_CHECKPOINT = "ALM/hubert-base-audioset"
 HUBERT_SAFETENSORS_GCS_BUCKET = "ast-heart-quality-revisions"
 HUBERT_SAFETENSORS_GCS_PREFIX = "checkpoints/hubert-base-audioset-safetensors/"

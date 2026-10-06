@@ -1,5 +1,5 @@
 """
-Regenerates the manuscript's six-panel metrics-versus-noise figure (Fig3_*.pdf)
+Regenerates the six-panel metrics-versus-noise figure (Fig3_*.pdf)
 plus its shared legend, from the fully fine-tuned, 5-fold results.
 
 Each panel plots one evaluation metric against the noise-intensity coefficient

@@ -181,7 +181,6 @@ def best_threshold_for_f1(scores, labels, max_candidates=200):
     the method's premise that added noise lowers SNR.
 
     Parameters
-    ----------
     max_candidates : int
         Upper bound on thresholds evaluated. If the training scores have more
         than this many distinct values, evenly spaced percentiles are used

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Per-lambda cross-validation for the AST heart quality model (Table 2).
+Per-lambda cross-validation for the AST heart quality model, frozen backbone.
 
 For each noise level λ, trains a fresh AST-QA model and evaluates it with
-10-fold patient-level cross-validation. This measures how well a model
+5-fold patient-level cross-validation (same splits as
+revision/fold_assignments/patient_folds_5fold.csv). This measures how well a model
 separates heart sounds from noise when trained and tested at the same
 noise level.
 
@@ -216,10 +217,10 @@ def evaluate_fold(model, test_loader, device):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Per-Lambda 10-Fold CV for AST Heart Quality")
+    parser = argparse.ArgumentParser(description="Per-Lambda 5-Fold CV for AST Heart Quality")
     parser.add_argument("--data_dir", type=str, required=True, help="Root directory containing dataset/")
     parser.add_argument("--output_dir", type=str, required=True, help="Output directory for results")
-    parser.add_argument("--n_folds", type=int, default=10)
+    parser.add_argument("--n_folds", type=int, default=5)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
@@ -258,7 +259,7 @@ def main():
     final_results = {}
 
     for l_val in lambdas:
-        logger.info(f"=== Starting 10-Fold CV for Lambda={l_val} ===")
+        logger.info(f"=== Starting {args.n_folds}-Fold CV for Lambda={l_val} ===")
         kf = KFold(n_splits=args.n_folds, shuffle=True, random_state=args.seed)
         lambda_metrics = []
 

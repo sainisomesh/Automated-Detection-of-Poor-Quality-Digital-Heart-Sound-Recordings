@@ -24,10 +24,11 @@ script runs that comparison:
          lunet_denoiser.py).
      All conditions use the same folds and files, so the comparison is
      paired.
-  3. The noise-aware models need no new training: the `clean` and
-     `noise_0_10` (lambda ~ U[0, 10]) results in
-     ../../../results/three_strategies_cv/final_results.json are the
-     published numbers the denoiser conditions are compared with.
+  3. The noise-aware models need no new training: the variable-noise
+     (lambda ~ U[0, 10]) results of the backbone adaptation ablation, on the
+     same 5-fold splits, are what the denoiser conditions are compared with
+     (../../results/reviewer1_unfreezing_ablation/frozen_5fold/ for the
+     frozen model, full_5fold_variable/ for the fine-tuned one).
 
 Two runs share the patient split, so `--n_folds` has no default:
 
@@ -39,20 +40,20 @@ Two runs share the patient split, so `--n_folds` has no default:
      so `--n_folds`, `--seed` and the patient list must match; the script
      stops if the number of checkpoints differs from `--n_folds`.
 
-Two configurations are reported: a frozen model with 10-fold CV and a fully
-fine-tuned model (`--unfreeze_mode full`) with 5-fold CV. Commands, run from
-this directory (the same as in ../../run_all.sh):
+Two configurations are reported, both with 5-fold CV: a frozen model and a
+fully fine-tuned model (`--unfreeze_mode full`). Commands, run from this
+directory (the same as in ../../run_all.sh):
 
-    # Frozen, 10-fold: train clean-only models, then compare denoisers
+    # Frozen, 5-fold: train clean-only models, then compare denoisers
     python run_denoiser_benchmark_cv.py \\
         --data_dir ../../../dataset/ --mixed_dir ../../../mixed_dataset/ \\
-        --output_dir ../../results/reviewer7_denoiser_benchmark/clean_only_10fold/ \\
-        --n_folds 10 --conditions no_denoise --save_checkpoints --epochs 5 --seed 42
+        --output_dir ../../results/reviewer7_denoiser_benchmark/clean_only_frozen_5fold/ \\
+        --n_folds 5 --conditions no_denoise --save_checkpoints --epochs 5 --seed 42
     python run_denoiser_benchmark_cv.py \\
         --data_dir ../../../dataset/ --mixed_dir ../../../mixed_dataset/ \\
-        --output_dir ../../results/reviewer7_denoiser_benchmark/denoiser_comparison_10fold/ \\
-        --n_folds 10 --conditions no_denoise,denoise_wavelet,denoise_wavelet_leveldep,denoise_lunet \\
-        --load_checkpoint_dir ../../results/reviewer7_denoiser_benchmark/clean_only_10fold/checkpoints/ \\
+        --output_dir ../../results/reviewer7_denoiser_benchmark/denoiser_comparison_frozen_5fold/ \\
+        --n_folds 5 --conditions no_denoise,denoise_wavelet,denoise_wavelet_leveldep,denoise_lunet \\
+        --load_checkpoint_dir ../../results/reviewer7_denoiser_benchmark/clean_only_frozen_5fold/checkpoints/ \\
         --seed 42
 
     # Fully fine-tuned, 5-fold

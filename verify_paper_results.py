@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Recompute every number reported in the revised manuscript from the
-checked-in raw per-fold prediction CSVs and compare it to the printed value.
+"""Recompute every reported number from the checked-in raw per-fold
+prediction CSVs and compare it to the reference value.
 
 Runs on CPU in about a minute, needs no GPU and no audio data, only
 numpy / pandas / scikit-learn. This is the fast path for checking that the
@@ -10,7 +10,7 @@ are the slow path that regenerates those predictions by retraining.
 For each reported cell the script recomputes the per-fold metrics at the
 fixed 0.5 decision threshold, aggregates them exactly as the training scripts
 do (mean across folds, 95% half-width = 1.96 * SD / sqrt(n_folds)), rounds to
-two decimals and checks equality with the manuscript. Significance markers
+two decimals and checks equality with the reference. Significance markers
 are checked against the paired-bootstrap p-values in the checked-in
 significance JSONs.
 
@@ -37,9 +37,7 @@ LAMBDAS = ["0.0", "0.25", "0.5", "1.0", "5.0", "10.0", "25.0", "50.0", "75.0", "
 METRICS = ["auroc", "auprc", "f1", "accuracy", "sensitivity", "specificity"]
 
 
-# ---------------------------------------------------------------------------
 # Metric recomputation
-# ---------------------------------------------------------------------------
 
 def fold_metrics(csv_path):
     df = pd.read_csv(csv_path)
@@ -82,21 +80,7 @@ def result(raw_dir, lam, expected_folds):
     return _cache[key]
 
 
-def original_three_strategies(strategy):
-    """The originally published frozen, 10-fold three-strategies results.
-
-    Raw predictions for that run survive only for folds 1, 2 and 10 (see
-    revision/README.md, 'Data notes'), so the published aggregate in
-    final_results.json is what the manuscript cites and what is checked here.
-    """
-    path = ROOT / "results" / "three_strategies_cv" / "final_results.json"
-    d = json.load(open(path))[strategy]
-    return {lam: {m: (100 * d[lam]["mean"][m], 100 * d[lam]["ci"][m]) for m in METRICS} for lam in LAMBDAS}
-
-
-# ---------------------------------------------------------------------------
 # Checking
-# ---------------------------------------------------------------------------
 
 class Checker:
     def __init__(self, verbose):
@@ -136,7 +120,9 @@ class Checker:
 
 
 def parse_cell(cell):
-    """'99.97$\\pm$0.03$^{***}$' -> (99.97, 0.03, '***')."""
+    """'99.97$\\pm$0.03$^{***}$' -> (99.97, 0.03, '***'); '--' -> (None, None, '')."""
+    if cell == "--":
+        return None, None, ""
     stars = "***" if "{***}" in cell else "*" if "{*}" in cell else ""
     cell = cell.split("$^")[0]
     if "$\\pm$" in cell:
@@ -153,7 +139,7 @@ def parse_rows(block):
     return rows
 
 
-# Values as printed in the revised manuscript.
+# Reference values.
 
 TABLE2 = """
 0.0   & 100.00$\\pm$0.00 & 100.00$\\pm$0.00 & 99.98$\\pm$0.03 & 99.98$\\pm$0.03 & 99.97$\\pm$0.05 & 100.00$\\pm$0.00
@@ -220,17 +206,18 @@ TABLE6_FULL = """
 100.0 & 49.65  & 49.82  & 51.51 & 49.94 & 52.86
 """
 
+# "--" cells are filled from the frozen denoiser run (revision/run_all.sh Step 4a).
 TABLE6_FROZEN = """
-0.0   & 100.00 & 100.00 & 99.52 & 99.81 & 99.96
-0.25  & 99.90  & 99.87  & 96.47 & 98.94 & 99.89
-0.5   & 99.59  & 99.51  & 93.74 & 97.58 & 99.76
-1.0   & 98.00  & 97.78  & 88.22 & 93.53 & 99.45
-5.0   & 69.20  & 68.52  & 64.06 & 61.25 & 91.29
-10.0  & 57.61  & 57.27  & 55.71 & 53.24 & 76.18
-25.0  & 52.29  & 52.08  & 51.93 & 51.31 & 59.33
-50.0  & 51.23  & 51.06  & 51.05 & 51.09 & 53.49
-75.0  & 50.95  & 50.81  & 50.80 & 51.05 & 53.01
-100.0 & 50.83  & 50.69  & 50.70 & 51.03 & 50.27
+0.0   & -- & -- & -- & -- & 99.94
+0.25  & -- & -- & -- & -- & 99.88
+0.5   & -- & -- & -- & -- & 99.79
+1.0   & -- & -- & -- & -- & 99.52
+5.0   & -- & -- & -- & -- & 91.54
+10.0  & -- & -- & -- & -- & 77.72
+25.0  & -- & -- & -- & -- & 60.50
+50.0  & -- & -- & -- & -- & 54.61
+75.0  & -- & -- & -- & -- & 52.99
+100.0 & -- & -- & -- & -- & 52.30
 """
 
 
@@ -310,16 +297,26 @@ def main():
             raw = den / "denoiser_comparison_full_5fold" / "raw_predictions" / cond
             ck.value(f"fine-tuned lambda={lam} {cond} AUROC", result(raw, lam, 5)["auroc"][0], em)
         ck.value(f"fine-tuned lambda={lam} variable-noise AUROC", result(full_var, lam, 5)["auroc"][0], cells[4][0])
-    orig_var = original_three_strategies("noise_0_10")
+    frozen_den = den / "denoiser_comparison_frozen_5fold" / "raw_predictions"
     for lam, cells in parse_rows(TABLE6_FROZEN).items():
         for cond, (em, _, _) in zip(conds, cells[:4]):
-            raw = den / "denoiser_comparison_10fold" / "raw_predictions" / cond
-            ck.value(f"frozen lambda={lam} {cond} AUROC", result(raw, lam, 10)["auroc"][0], em)
-        ck.value(f"frozen lambda={lam} variable-noise AUROC (published 10-fold)", orig_var[lam]["auroc"][0], cells[4][0])
+            label = f"frozen lambda={lam} {cond} AUROC"
+            if not (frozen_den / cond / f"lambda_{lam}").is_dir():
+                ck.claim(label, False, "5-fold frozen denoiser results missing, rerun revision/run_all.sh Step 4a")
+            elif em is None:
+                got = result(frozen_den / cond, lam, 5)["auroc"][0]
+                ck.claim(label, False, f"no reference value yet, recomputed {got:.4f}")
+            else:
+                ck.value(label, result(frozen_den / cond, lam, 5)["auroc"][0], em)
+        ck.value(f"frozen lambda={lam} variable-noise AUROC", result(frozen, lam, 5)["auroc"][0], cells[4][0])
     # Denoiser checkpoints are the same clean-only model whether or not a
     # denoiser is applied, so no_denoise must equal the clean-only run.
     for tag, a, b, k in [("fine-tuned", "clean_only_full_5fold", "denoiser_comparison_full_5fold", 5),
-                         ("frozen", "clean_only_10fold", "denoiser_comparison_10fold", 10)]:
+                         ("frozen", "clean_only_frozen_5fold", "denoiser_comparison_frozen_5fold", 5)]:
+        if not (den / a).is_dir() or not (den / b).is_dir():
+            ck.claim(f"{tag}: reloaded checkpoint reproduces clean-only run", False,
+                     f"{a}/ or {b}/ missing, rerun the denoiser benchmark")
+            continue
         for lam in LAMBDAS:
             x = result(den / a / "raw_predictions" / "no_denoise", lam, k)["auroc"][0]
             y = result(den / b / "raw_predictions" / "no_denoise", lam, k)["auroc"][0]

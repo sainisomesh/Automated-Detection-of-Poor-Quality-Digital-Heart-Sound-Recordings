@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Generate fold assignments CSV for reproducibility verification."""
+"""Generate the 5-fold patient-level fold assignments CSV.
+
+Same construction as revision/fold_assignments/generate_5fold_assignments.py
+(sorted patient IDs, KFold seed 42), so the output is identical to
+revision/fold_assignments/patient_folds_5fold.csv and to the splits the
+training scripts build internally with --n_folds 5.
+
+Usage (from reproducibility/):
+    python src/generate_fold_assignments.py [data_dir] [n_splits]
+"""
 
 import os
 import sys
@@ -9,6 +18,7 @@ import pandas as pd
 
 def main():
     data_dir = sys.argv[1] if len(sys.argv) > 1 else "dataset/"
+    n_splits = int(sys.argv[2]) if len(sys.argv) > 2 else 5
     data_root = Path(data_dir)
     heart_files = sorted(list(data_root.rglob("PhysioNet2022/**/*.wav")))
 
@@ -18,7 +28,7 @@ def main():
         patient_map.setdefault(pid, []).append(f.name)
     pids = sorted(list(patient_map.keys()))
 
-    kf = KFold(n_splits=10, shuffle=True, random_state=42)
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
     rows = []
     for fold, (_, test_idx) in enumerate(kf.split(pids)):
         for i in test_idx:
@@ -28,8 +38,9 @@ def main():
 
     df = pd.DataFrame(rows)
     os.makedirs("fold_assignments", exist_ok=True)
-    df.to_csv("fold_assignments/patient_folds.csv", index=False)
-    print(f"Saved {len(df)} file-fold assignments for {len(pids)} patients")
+    out_path = f"fold_assignments/patient_folds_{n_splits}fold.csv"
+    df.to_csv(out_path, index=False)
+    print(f"Saved {len(df)} file-fold assignments for {len(pids)} patients across {n_splits} folds -> {out_path}")
 
 if __name__ == "__main__":
     main()

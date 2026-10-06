@@ -202,7 +202,6 @@ def build_feature_set(heart_files, icbhi_files, env_files, lam, is_train, n_jobs
     samples share a noise draw.
 
     Returns
-    -------
     (X, y, filenames)
         Feature matrix, labels, and the source path per row ("noise" for
         negatives).

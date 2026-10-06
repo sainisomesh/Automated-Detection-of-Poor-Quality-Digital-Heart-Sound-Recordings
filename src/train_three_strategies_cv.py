@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Three training strategies, 10-fold cross-validation (Figure 3).
+Three training strategies, frozen backbone, 5-fold cross-validation.
 
 Compares three training approaches for AST heart quality detection,
 each evaluated across 10 noise test levels (λ):
@@ -10,7 +10,8 @@ each evaluated across 10 noise test levels (λ):
   3. noise_10:   Trained with fixed noise λ = 10
 
 All three models are tested at λ_test ∈ {0, 0.25, 0.5, 1, 5, 10, 25, 50, 75, 100}
-using 10-fold patient-level cross-validation.
+using 5-fold patient-level cross-validation (same splits as
+revision/fold_assignments/patient_folds_5fold.csv).
 
 Usage:
     python train_three_strategies_cv.py --data_dir dataset/ --output_dir results/three_strategies_cv/
@@ -263,10 +264,10 @@ def evaluate_model(model, hearts, icbhi, env, processor, device, batch_size=16):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Three training strategies, 10-fold CV")
+    parser = argparse.ArgumentParser(description="Three training strategies, 5-fold CV")
     parser.add_argument("--data_dir", type=str, required=True, help="Root directory containing dataset/")
     parser.add_argument("--output_dir", type=str, required=True, help="Output directory for results")
-    parser.add_argument("--n_folds", type=int, default=10)
+    parser.add_argument("--n_folds", type=int, default=5)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
