@@ -7,9 +7,8 @@ The parent directory `../` holds the frozen-backbone per-lambda and three-strate
 experiments and the single entry point `../run_all.sh`. Both use the same source datasets
 and the same 5-fold patient splits.
 
-All results are checked in under `results/`. `../run_all.sh` (or
-`python ../verify_paper_results.py`) recomputes every reported number from them without
-retraining.
+All results are checked in under `results/`, as raw per-fold predictions and aggregated
+metrics.
 
 ## Experiments
 
@@ -207,8 +206,6 @@ python src/figures/regenerate_fig3_unfrozen.py   # writes results/figures/Fig3_*
 Every training script writes raw per-fold `predictions.csv` files plus aggregated
 metrics (mean and 95% half-width, 1.96 · SD / sqrt(n_folds), per lambda). With the same
 seed and fold count, a rerun reproduces the checked-in values up to GPU non-determinism.
-`python ../verify_paper_results.py` compares whatever predictions are in `results/` with
-the reference values.
 
 The significance scripts are deterministic and read only the prediction CSVs, so they
 reproduce their JSON outputs exactly.

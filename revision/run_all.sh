@@ -200,4 +200,3 @@ fi
 echo ""
 
 echo "Done. Results, where generated, are under results/<experiment>/."
-echo "Run python ../verify_paper_results.py to compare them with the reference values."

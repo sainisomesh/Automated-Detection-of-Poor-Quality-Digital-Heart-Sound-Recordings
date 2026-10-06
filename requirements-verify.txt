@@ -1,5 +1,5 @@
-# Minimal dependencies for Step 1 of run_all.sh (verify_paper_results.py,
-# the paired significance tests and Figure 3). No GPU or deep-learning stack.
+# Minimal dependencies for Step 1 of run_all.sh (the paired significance
+# tests and Figure 3). No GPU or deep-learning stack.
 numpy
 pandas
 scikit-learn

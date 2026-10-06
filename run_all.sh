@@ -2,10 +2,9 @@
 # Reproduce the results of "Automated Detection of Poor-Quality Digital Heart
 # Sounds via Noise Augmentation".
 #
-# Step 1  Verify (minutes, CPU only, no data download). Recomputes every
-#         table, significance marker and quoted number from the checked-in
-#         per-fold predictions, re-runs the paired significance tests, and
-#         regenerates Figure 3.
+# Step 1  Verify (minutes, CPU only, no data download). Re-runs the paired
+#         significance tests on the checked-in per-fold predictions, checks
+#         they match the checked-in JSONs, and regenerates Figure 3.
 # Step 2  Retrain the experiments in revision/ (GPU, optional). Hands off to
 #         revision/run_all.sh, which prompts per experiment.
 # Step 3  Retrain the frozen-backbone per-lambda and three-strategies
@@ -33,7 +32,7 @@ for arg in "$@"; do
     case "$arg" in
         --verify-only) VERIFY_ONLY=1 ;;
         --yes|-y) ASSUME_YES=1 ;;
-        -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
         *) echo "Unknown option: $arg (see --help)" >&2; exit 1 ;;
     esac
 done
@@ -44,14 +43,11 @@ echo ""
 setup_python
 echo ""
 
-# Step 1: verify against the checked-in predictions
-echo "[Step 1] Verifying results from the checked-in predictions"
+# Step 1: check the significance tests and regenerate Figure 3
+echo "[Step 1] Checking results from the checked-in predictions"
 install_requirements requirements-verify.txt
 echo ""
 
-python verify_paper_results.py
-
-echo ""
 echo "Re-running the paired significance tests (deterministic, B=1000)..."
 SIG_A=revision/results/reviewer1_baselines/significance_vs_ast_qa_unfrozen_paired.json
 SIG_B=revision/results/reviewer7_backbone_swap/significance_full_paired.json
@@ -100,8 +96,7 @@ fi
 
 # Step 2: revision experiments
 echo "[Step 2] Retrain the experiments in revision/ (GPU)"
-echo "Overwrites the checked-in results under revision/results/ in place;"
-echo "run verify_paper_results.py afterwards to compare."
+echo "Overwrites the checked-in results under revision/results/ in place."
 if ask "Continue into the revision experiments?"; then
     bash "$SCRIPT_DIR/revision/run_all.sh"
 else

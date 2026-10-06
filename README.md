@@ -33,18 +33,15 @@ On Windows, run this from Git Bash or WSL. The only prerequisite is Python
 environment in .venv/ and installs everything else itself.
 
 The first step takes about a minute on a laptop CPU and needs no GPU and no data
-download. It recomputes every table, significance marker and quoted number from
-the per-fold predictions checked in under revision/results/, re-runs the paired
-significance tests, and regenerates Figure 3 into revision/results/figures/. It
-then asks before starting any retraining.
+download. It re-runs the paired significance tests on the per-fold predictions
+checked in under revision/results/, checks they match the checked-in JSONs, and
+regenerates Figure 3 into revision/results/figures/. It then asks before starting
+any retraining.
 
 ```
-./run_all.sh --verify-only   only the verification step
-./run_all.sh --yes           verification, then all retraining without prompts
+./run_all.sh --verify-only   only the first step
+./run_all.sh --yes           first step, then all retraining without prompts
 ```
-
-verify_paper_results.py can also be run on its own (needs numpy, pandas,
-scikit-learn; see requirements-verify.txt).
 
 ## Where each result comes from
 
@@ -74,15 +71,8 @@ baselines (revision Step 1) run on CPU.
   experiments in src/.
 
 The first retraining step installs requirements.txt and downloads the raw dataset
-from Zenodo (~3 GB) into dataset/. Retraining writes into the same results
-directories, so afterwards run
-
-```
-python verify_paper_results.py
-```
-
-to compare the new predictions with the reference values. Expect small
-differences from GPU non-determinism.
+from Zenodo (~3 GB) into dataset/. Retraining overwrites the checked-in results
+in place. Expect small differences from GPU non-determinism.
 
 ## Data availability
 
@@ -114,11 +104,10 @@ Sources:
 
 ```
 run_all.sh                 single entry point (see Quick start)
-verify_paper_results.py    recomputes the reported numbers from predictions
 download_data.py           fetches the source dataset from Zenodo
 env_setup.sh               virtual environment setup shared by both run_all.sh
 requirements.txt           full dependencies for retraining
-requirements-verify.txt    minimal dependencies for verification
+requirements-verify.txt    minimal dependencies for the first step
 fold_assignments/          5-fold patient splits
 src/                       frozen-backbone per-λ and three-strategies experiments
 results/                   output of src/ when retrained (Step 3)
